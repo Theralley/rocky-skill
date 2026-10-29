@@ -18,15 +18,16 @@ Also triggers on "rocky help", "what rocky commands", "how do I use rocky".
 
 ```
 Modes:
-  /rocky              full (default)
-  /rocky lite         lighter
-  /rocky ultra        extreme
-  /rocky wenyan       classical Chinese
+  /rocky              the voice (default)
+  /ultrarocky            grammar stripped
+  /megarocky             classical Chinese
+  /rocky status       report the mode, change nothing
 
 Skills:
   /rocky-commit       terse Conventional Commits
   /rocky-review       one-line PR comments
-  /rocky-stats        session token savings
+  /rocky-compress     smaller Markdown memory files
+  /rocky-stats        recorded token usage (savings unknown)
 
 Deactivate:
   "stop rocky" or "normal mode"

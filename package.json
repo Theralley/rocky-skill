@@ -1,8 +1,8 @@
 {
   "name": "rocky-skill-installer",
-  "version": "0.1.0",
-  "description": "Rocky skill — make your AI coding agent talk like Rocky the Eridian from Project Hail Mary. Cuts ~75% of output tokens while keeping full technical accuracy. Installs across Claude Code, Codex, Gemini, Cursor, and 30+ more agents. Fork of caveman by Julius Brussee.",
-  "license": "MIT",
+  "version": "1.1.0",
+  "description": "Rocky skill installer: detects your AI coding agents and installs Rocky for each one. Rocky the Eridian from Project Hail Mary as your agent's voice. Fork of caveman by Julius Brussee.",
+  "license": "Apache-2.0",
   "author": "Theralley",
   "homepage": "https://github.com/Theralley/rocky-skill",
   "repository": {
@@ -13,16 +13,19 @@
     "url": "https://github.com/Theralley/rocky-skill/issues"
   },
   "bin": {
-    "rocky": "./bin/install.js"
+    "rocky-install": "./installer/install.js"
   },
   "engines": {
     "node": ">=18"
   },
   "scripts": {
-    "test": "node --test tests/installer/*.test.mjs"
+    "test": "node --test --test-force-exit --test-concurrency=2 tests/installer/*.test.mjs tests/hooks/*.test.mjs"
   },
   "files": [
-    "bin/",
+    ".cursor-plugin/",
+    "installer/",
+    ".codex/codex-sessionstart.js",
+    "hooks/",
     "src/",
     "agents/",
     "skills/",
@@ -30,6 +33,9 @@
     "commands/",
     "dist/rocky.skill",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "NOTICE",
+    "!**/__pycache__/**",
+    "!**/*.py[cod]"
   ]
 }

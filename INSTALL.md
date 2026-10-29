@@ -9,74 +9,286 @@ If just want it to work, run the one-liner. If want to know what gets touched, s
 **macOS / Linux / WSL / Git Bash**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Theralley/rocky-skill/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Theralley/rocky-skill/v1.1.0/install.sh | bash
 ```
 
 **Windows (PowerShell 5.1+)**
 
 ```powershell
-irm https://raw.githubusercontent.com/Theralley/rocky-skill/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/Theralley/rocky-skill/v1.1.0/install.ps1 | iex
 ```
+
+> Piping a script straight into a shell runs it sight-unseen. If you'd rather read it first, download then run: `curl -fsSL https://raw.githubusercontent.com/Theralley/rocky-skill/v1.1.0/install.sh -o install.sh` (review it) `&& bash install.sh`. Bootstrap, package, skill, and hook downloads stay pinned to that release tag, never the moving `main` branch. Hook files are checked against a SHA-256 list from the same tag: that catches a broken or partial download, not a tag that was moved. If that list can't be fetched or any file fails it, no hook is installed and your settings stay as they were. Set `ROCKY_REF` only when intentionally testing another ref.
 
 What it does:
 
 - Auto-detects every supported agent installed on your machine (Claude Code, Cursor, Codex, etc.).
 - For each one, runs that agent's native install path (plugin / extension / rule file / `npx skills add`).
-- Wires Claude Code hooks, statusline badge, and tries the optional `rocky-shrink` MCP middleware on top.
+- Installs Rockycrew investigator, builder, and reviewer presets where the host supports native subagents.
+- Wires Claude Code hooks and statusline badge on top, plus a Codex start-of-session hook so Codex talks rocky without asking. (The optional `rocky-shrink` MCP middleware is opt-in via `--with-mcp-shrink`, see the flag table below. It is not published on npm yet, so the installer skips it cleanly when npm has no package metadata.)
 - Skips anything you don't have. Safe to re-run. ~30 seconds end-to-end.
 
 Want to preview before installing? Use `--dry-run`:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Theralley/rocky-skill/main/install.sh | bash -s -- --dry-run
+curl -fsSL https://raw.githubusercontent.com/Theralley/rocky-skill/v1.1.0/install.sh | bash -s -- --dry-run
 ```
 
 ## Per-agent install
 
 If you want to install for one agent (or want to know exactly what command runs under the hood), use the table below. Every row also works as `--only <id>` to the unified installer.
 
+> **On npm 12 or newer, add `--allow-git=root` to any bare `npx -y github:...` command below.** npm 12 turns off git package fetches by default, so a plain `npx -y github:Theralley/rocky-skill` stops with `npm error code EALLOWGIT`. The flag opts in just the one package you asked for: `npx --allow-git=root -y github:Theralley/rocky-skill -- --only <id>`. Check with `npx --version`. `install.sh` and `install.ps1` detect the npm major and add the flag themselves starting with `v3.2.0`, so the one-liners above (pinned to `v4.0.1`) work on npm 12. **One-liners pinned to `v3.1.0` or older download shims that predate that change and keep failing on npm 12**: switch the tag to `v4.0.1`, or install with the flag directly: `npx --allow-git=root -y github:Theralley/rocky-skill#v4.0.1 -- --only <id>`.
+
+> **Choose the install scope your agent reads.** `-g` installs into the agent's user skill directory. Without it, skills belong to the current project. The unified installer uses user scope except for Replit, whose documented filesystem location is the project's `.agents/skills`. Run Replit's command from that project's Shell. Replit workspace-wide skills are managed in Workspace Settings.
+
 | Agent | Install command | Auto-activates? |
 |---|---|:-:|
 | **Claude Code** | `claude plugin marketplace add Theralley/rocky-skill && claude plugin install rocky@rocky` | Yes |
 | **Gemini CLI** | `gemini extensions install https://github.com/Theralley/rocky-skill` | Yes |
-| **opencode** | `node bin/install.js --only opencode` *(or `npx -y github:Theralley/rocky-skill -- --only opencode`)* | Yes (plugin + AGENTS.md) |
+| **opencode** | `node installer/install.js --only opencode` *(or `npx -y github:Theralley/rocky-skill -- --only opencode`)* | Yes (plugin + AGENTS.md) |
+| **Oh My Pi (OMP)** | `npx -y github:Theralley/rocky-skill -- --only omp` *(or `node installer/install.js --only omp` from a clone)* | Yes (native OMP plugin) |
 | **OpenClaw** | `npx -y github:Theralley/rocky-skill -- --only openclaw` | Yes (workspace skill + SOUL.md) |
-| **Codex CLI** | `npx skills add Theralley/rocky-skill -a codex` | Per-session: `/rocky` |
-| **Cursor** | `npx skills add Theralley/rocky-skill -a cursor` | Per-session by default; `--with-init` for an always-on rule file |
-| **Windsurf** | `npx skills add Theralley/rocky-skill -a windsurf` | Per-session by default; `--with-init` for an always-on rule file |
-| **Cline** | `npx skills add Theralley/rocky-skill -a cline` | Per-session by default; `--with-init` for an always-on rule file |
-| **GitHub Copilot** *(soft probe)* | `npx -y github:Theralley/rocky-skill -- --only copilot --with-init` | Repo-wide instructions via `--with-init` |
-| **Continue** | `npx skills add Theralley/rocky-skill -a continue` | No — say `/rocky` |
-| **Kilo Code** | `npx skills add Theralley/rocky-skill -a kilo` | No |
-| **Roo Code** | `npx skills add Theralley/rocky-skill -a roo` | No |
-| **Augment Code** | `npx skills add Theralley/rocky-skill -a augment` | No |
-| **Aider Desk** | `npx skills add Theralley/rocky-skill -a aider-desk` | No |
-| **Sourcegraph Amp** | `npx skills add Theralley/rocky-skill -a amp` | No |
-| **IBM Bob** | `npx skills add Theralley/rocky-skill -a bob` | No |
-| **Crush** | `npx skills add Theralley/rocky-skill -a crush` | No |
-| **Devin (terminal)** | `npx skills add Theralley/rocky-skill -a devin` | No |
-| **Droid (Factory)** | `npx skills add Theralley/rocky-skill -a droid` | No |
-| **ForgeCode** | `npx skills add Theralley/rocky-skill -a forgecode` | No |
-| **Block Goose** | `npx skills add Theralley/rocky-skill -a goose` | No |
-| **iFlow CLI** | `npx skills add Theralley/rocky-skill -a iflow-cli` | No |
-| **Kiro CLI** | `npx skills add Theralley/rocky-skill -a kiro-cli` | No |
-| **Mistral Vibe** | `npx skills add Theralley/rocky-skill -a mistral-vibe` | No |
-| **OpenHands** | `npx skills add Theralley/rocky-skill -a openhands` | No |
-| **Qwen Code** | `npx skills add Theralley/rocky-skill -a qwen-code` | No |
-| **Atlassian Rovo Dev** | `npx skills add Theralley/rocky-skill -a rovodev` | No |
-| **Tabnine CLI** | `npx skills add Theralley/rocky-skill -a tabnine-cli` | No |
-| **Trae** | `npx skills add Theralley/rocky-skill -a trae` | No |
-| **Warp** | `npx skills add Theralley/rocky-skill -a warp` | No |
-| **Replit Agent** | `npx skills add Theralley/rocky-skill -a replit` | No |
-| **JetBrains Junie** *(soft probe)* | `npx skills add Theralley/rocky-skill -a junie` | No |
-| **Qoder** *(soft probe)* | `npx skills add Theralley/rocky-skill -a qoder` | No |
-| **Google Antigravity** *(soft probe)* | `npx skills add Theralley/rocky-skill -a antigravity` | No |
+| **Hermes Agent** | `npx -y github:Theralley/rocky-skill -- --only hermes` *(or `node installer/install.js --only hermes` from a clone)* | Yes (native skills, enabled on load) |
+| **Antigravity CLI** (`agy`) | `npx -y github:Theralley/rocky-skill -- --only antigravity-cli` | Yes ([agy plugin](#antigravity-cli)) |
+| **Codex CLI** | `npx -y github:Theralley/rocky-skill -- --only codex` *(skills only, no hook: `npx skills add Theralley/rocky-skill -a codex -g`)* | Yes (SessionStart hook — trust it once with `/hooks`); skills-only: `$rocky` (Codex calls skills with `$`, not `/`) |
+| **Cursor** | `npx -y github:Theralley/rocky-skill -- --only cursor` *(or the [Cursor plugin](#cursor))* | Yes (session hook) |
+| **Windsurf** | `npx skills add Theralley/rocky-skill -a windsurf -g` | Per-session by default; `--with-init` for an always-on rule file |
+| **Cline** | `npx skills add Theralley/rocky-skill -a cline -g` | Per-session by default; `--with-init` for an always-on rule file |
+| **GitHub Copilot** | `npx -y github:Theralley/rocky-skill -- --only copilot --with-init` | Copilot CLI: Yes (session hook). VS Code: repo-wide instructions via `--with-init` |
+| **Continue** | `npx -y github:Theralley/rocky-skill -- --only continue` | No — invoke the Rocky skill |
+| **Kilo Code** | `npx skills add Theralley/rocky-skill -a kilo -g` | No |
+| **Roo Code** | `npx skills add Theralley/rocky-skill -a roo -g` | No |
+| **Augment Code** | `npx skills add Theralley/rocky-skill -a augment -g` | No |
+| **AiderDesk** | `npx -y github:Theralley/rocky-skill -- --only aider-desk` | No — enable Skills Tools |
+| **Sourcegraph Amp** | `npx skills add Theralley/rocky-skill -a amp -g` | No |
+| **IBM Bob** | `npx skills add Theralley/rocky-skill -a bob -g` | No |
+| **CodeBuddy Code** | `npx skills add Theralley/rocky-skill -a codebuddy -g` | No |
+| **Crush** | `npx -y github:Theralley/rocky-skill -- --only crush` | No |
+| **Devin (terminal)** | `npx skills add Theralley/rocky-skill -a devin -g` | No |
+| **Droid (Factory)** | `npx skills add Theralley/rocky-skill -a droid -g` | No |
+| **ForgeCode** | `npx skills add Theralley/rocky-skill -a forgecode -g` | No |
+| **Block Goose** | `npx skills add Theralley/rocky-skill -a goose -g` | No |
+| **Grok Build** | `npx -y github:Theralley/rocky-skill -- --only grok` | Yes, per xAI docs (`~/.grok/AGENTS.md` block; not yet tested live) |
+| **iFlow CLI** | `npx -y github:Theralley/rocky-skill -- --only iflow` | No |
+| **Kiro (IDE + CLI)** | `npx skills add Theralley/rocky-skill -a kiro-cli -g` | No ([always-on steering](#kiro-ide-and-cli)) |
+| **Mistral Vibe** | `npx skills add Theralley/rocky-skill -a mistral-vibe -g` | No |
+| **OpenHands** | `npx skills add Theralley/rocky-skill -a openhands -g` | No |
+| **Qwen Code** | `npx skills add Theralley/rocky-skill -a qwen-code -g` | No |
+| **Atlassian Rovo Dev** | `npx skills add Theralley/rocky-skill -a rovodev -g` | No |
+| **Tabnine CLI** | `npx skills add Theralley/rocky-skill -a tabnine-cli -g` | No |
+| **Trae** | `npx skills add Theralley/rocky-skill -a trae -g` | No |
+| **Warp** | `npx skills add Theralley/rocky-skill -a warp -g` | No |
+| **Replit Agent** | From the project Shell: `npx skills add Theralley/rocky-skill -a replit` | No |
+| **JetBrains Junie** *(soft probe)* | `npx skills add Theralley/rocky-skill -a junie -g` | No |
+| **Qoder** *(soft probe)* | `npx skills add Theralley/rocky-skill -a qoder -g` | No |
+| **Antigravity IDE** *(soft probe)* | `npx -y github:Theralley/rocky-skill -- --only antigravity` | No |
+| **Antigravity 2.0** *(explicit selection)* | `npx -y github:Theralley/rocky-skill -- --only antigravity-2` | No |
 
-"Soft probe" = installer won't auto-detect these without `--only <id>` because there's no reliable always-on signal (Copilot subscription state is auth-gated; the others have no CLI / config-dir-only). Pass the flag when you want them.
+Not in the table, with their own steps below: [Claude apps (claude.ai, desktop, mobile, Cowork)](#claude-apps-claudeai-desktop-mobile-cowork), [GitHub Copilot in VS Code](#github-copilot-in-vs-code-agent-plugin), [nanocoder](#nanocoder), and [dev containers](#dev-containers-codespaces-remote-machines).
 
-For "auto-activates? No" agents, type `/rocky` once per session (or use natural-language triggers like "talk like rocky", "rocky mode").
+Already inside a Claude Code session? The same Claude Code install as slash commands:
 
-Full agent matrix (with detection rules) is in `bin/install.js` under the `PROVIDERS` array.
+```text
+/plugin marketplace add Theralley/rocky-skill
+/plugin install rocky@rocky
+```
+
+"Soft probe" = installer won't auto-detect these without `--only <id>` because there's no reliable always-on signal (no CLI / config-dir-only). Pass the flag when you want them.
+
+For "auto-activates? No" agents, invoke the Rocky skill using the host's skill menu, `/rocky` where supported (`$rocky` in Codex), or a prompt naming the skill. Enable skills first if your host requires it: Augment has a Skills beta setting; AiderDesk requires Skills Tools in the active agent profile; custom Kiro agents need skill resources.
+
+**Pick the mode new sessions start in.** Put `{"defaultMode": "ultrarocky"}` (or `"rocky"`, `"megarocky"`, `"off"`) in `~/.config/rocky/config.json`, or in a `.rocky.json` at a project root for just that project.
+
+Scripted Claude Code runs (`claude -p` and the Agent SDK) start with rocky off whatever that file says, so tools that read Claude's reply get plain text. Type `/rocky` in the prompt, or set `ROCKY_DEFAULT_MODE=rocky` (or another mode) in their environment, to turn it on.
+
+**Subagents.** Some agents hand parts of a job to helper agents ("subagents"). Whether the helpers talk rocky depends on the host:
+
+- **Claude Code**: yes. Each subagent starts in the mode of the window that spawned it. Say "stop rocky" and new subagents start normal too. Rockycrew agents keep their own rocky voice.
+- **opencode**: subagents get the always-on rocky rules from `AGENTS.md` (checked on opencode 2.0.22). Those rules are fixed text, so "stop rocky" does not switch them off for subagents.
+- **Hermes Agent**: not verified. If a delegated task comes back wordy, ask for the rocky skill in that task.
+
+Continue needs physical skill directories because its current loader skips per-skill symlinks. The unified installer copies into `CONTINUE_GLOBAL_DIR/skills` (default `~/.continue/skills`) and follows AiderDesk's `AIDER_DESK_HOME_DIR` / `AIDER_DESK_DIR` overrides. It also honors `IFLOW_HOME`, Crush's exact `CRUSH_SKILLS_DIR`, and `GROK_HOME` (Grok Build reads `GROK_HOME/skills`, default `~/.grok/skills`). For Grok Build it also adds a marker-fenced rocky ruleset block to `GROK_HOME/AGENTS.md`, the global rules file Grok loads every session according to xAI's docs (we have not tested this against a real Grok binary yet); your own text in that file stays. Use the same environment when uninstalling — for a relative override, that means the same working directory too, since the path resolves against `cwd`. Existing unowned skill directories or symlinks produce a conflict rather than being silently replaced.
+
+Antigravity IDE reads `~/.gemini/antigravity/skills`; Antigravity 2.0 reads `~/.gemini/config/skills`. Select the matching product. Each command copies only into that product's directory.
+
+**Finding a profile slug for `npx skills add ... -a <profile>`?** Either read the table above, or print the live matrix from the installer:
+
+```bash
+# Either of these works (install.sh / install.ps1 are thin shims that
+# forward all flags to installer/install.js):
+bash install.sh --list             # macOS / Linux / WSL, from a local clone
+pwsh install.ps1 --list            # Windows / PowerShell, from a local clone
+node installer/install.js --list         # any platform, from a local clone
+npx -y github:Theralley/rocky-skill -- --list   # no clone needed
+```
+
+Each row prints the agent id, profile slug (where applicable), and whether it was auto-detected on your machine. Full agent matrix (with detection rules) is also defined in `installer/install.js` under the `PROVIDERS` array.
+
+### Codex
+
+With `codex` on your PATH, `npx -y github:Theralley/rocky-skill -- --only codex`
+installs the skills and a small start-of-session hook. Every new Codex session
+(and every `/clear` or context compaction) then starts in rocky, following
+your configured default mode — including `off`. Codex asks you to review new hooks: run `/hooks` once in
+Codex and trust the rocky one. Hooks are on by default in current Codex; if
+`codex features list` shows `hooks` off, add `[features] hooks = true` to
+`~/.codex/config.toml`.
+
+The hook files live in `$CODEX_HOME/rocky/` (default `~/.codex/rocky/`) and
+one entry is added to `$CODEX_HOME/hooks.json`. Re-running never duplicates it.
+`--no-hooks` keeps the skills-only, per-session behavior: type `$rocky`.
+`--uninstall` removes only rocky's entry and files. Use the same `CODEX_HOME`
+for install and uninstall.
+
+### Oh My Pi (OMP)
+
+With `omp` on your PATH, run `node installer/install.js --only omp` from this clone,
+then restart OMP. The native plugin adds nine skills, eight commands, Rockycrew
+presets, a ROCKY badge, and Rocky instructions on each agent turn. Commands
+such as `/ultrarocky` and `stop rocky` instruct the model; the badge indicates
+that the plugin is loaded. Host lifecycle and prompt delivery were checked with
+OMP 18.2.6. This integration does not read Claude Code session statistics.
+
+The installer keeps its package at `~/.omp/rocky-plugin/` and asks OMP to
+register it in OMP's own configured plugin directory. Use the same OMP environment
+when uninstalling. A plugin already named `rocky` at another location is a
+conflict: resolve it through OMP first, even when using `--force`.
+
+Untracked or edited package files are preserved. To replace them intentionally,
+use `--only omp --force`; the ownership journal records a backup for restoration
+on uninstall. Failed registration retains the owned package, journal, and backups
+so OMP cannot be left pointing at deleted files. Fix the reported host error and
+rerun the install, or uninstall. Failed deregistration retains those files too.
+
+### Cursor
+
+Two ways in. Pick one: with both, every chat gets the rules twice.
+
+- **Installer.** `npx -y github:Theralley/rocky-skill -- --only cursor` adds
+  the skills, the Rockycrew agents (`~/.cursor/agents/`) and a session hook
+  (`~/.cursor/hooks.json` plus `~/.cursor/rocky/`). The Cursor editor, the
+  Agents Window and `cursor-agent` all read these. `--no-hooks` installs the
+  agents without the hook; it does not remove a hook an earlier install
+  added (`--uninstall` does). `--uninstall` removes only rocky's entry from
+  `hooks.json`; your other hooks stay.
+- **Plugin.** This repo is a Cursor plugin (`.cursor-plugin/plugin.json`: the
+  skills, the same session hook, and the Rockycrew agents as-is from `agents/`).
+  Cursor skips their Claude-only model pin and runs them on your chat model;
+  the installer's copies also mark two of them read-only. Clone it into
+  `~/.cursor/plugins/local/rocky`, then run **Developer: Reload Window**. For
+  the CLI: `cursor-agent --plugin-dir ~/.cursor/plugins/local/rocky`.
+
+Either way, each new chat starts in your configured default mode
+(`ROCKY_DEFAULT_MODE`, a repo `.rocky.json`, or your user config);
+`"defaultMode": "off"` keeps chats normal. Checked with `cursor-agent`
+2026.09.18. Cursor does not read rule files from `~/.cursor/rules/` (user rules
+live in Settings), so the per-repo `.cursor/rules/rocky.mdc` from
+`--with-init` stays the rule-file option. Not checked: the Cursor editor's
+import of Claude Code hooks. If you also have rocky's Claude Code hooks and
+see the rules twice, turn one of them off.
+
+### GitHub Copilot CLI
+
+`--only copilot` installs the skills for every Copilot surface. If the Copilot
+CLI is on your machine (`copilot` on PATH, or `COPILOT_HOME` set), it also adds
+a session hook so every new `copilot` session starts in rocky mode — no
+`/rocky` needed. It follows your configured default (`ROCKY_DEFAULT_MODE`,
+a repo `.rocky.json`, or your user config), so `"defaultMode": "off"` keeps
+sessions normal. Checked with Copilot CLI 1.0.92.
+
+Files, all owned by the installer and removed by `--uninstall`:
+`$COPILOT_HOME/hooks/rocky.json` (default `~/.copilot/hooks/`) and
+`$COPILOT_HOME/rocky/`. Other files in `hooks/` are never touched. Skip the
+hook with `--no-hooks` (it skips adding one; `--uninstall` removes one already
+there). VS Code reads the same `hooks/` folder, but its
+documented session output is shaped differently and this path is untested
+there: for VS Code Copilot Chat, use `--with-init` for always-on.
+
+### Antigravity CLI
+
+With `agy` on your PATH, `--only antigravity-cli` builds a small `rocky`
+plugin (the skills plus one always-on rule) and installs it with
+`agy plugin install`. Every new `agy` session then talks rocky. Checked with
+agy 1.2.17.
+
+The rule is fixed text, so `defaultMode` settings do not reach it. To go back
+to normal prose, say `stop rocky` in a session, or switch the plugin off for
+good with `agy plugin disable rocky` (`enable` turns it back on).
+`--uninstall` runs `agy plugin uninstall rocky`. This is separate from the
+**Antigravity IDE** and **Antigravity 2.0** rows, which copy skills only.
+
+### Claude apps: claude.ai, desktop, mobile, Cowork
+
+Nothing to install on your phone or inside Cowork. Add rocky to your Claude account once, from a browser or the desktop app, and it follows the account:
+
+1. On [claude.ai](https://claude.ai) or in the Claude desktop app, open **Customize > Plugins**.
+2. Pick **Add > Add marketplace** and enter `Theralley/rocky-skill`.
+3. Add **Rocky** from that marketplace.
+4. Turn on **Settings > Capabilities > Code execution and file creation**. Claude's skills need it.
+
+Then:
+
+- **Chat** (web, desktop, Android, iOS): chat has no startup hook, so rocky waits until asked. Start a chat with `/rocky` (pick it from the `/` menu) or say "rocky mode". Want it in every chat? Paste the text of [`src/rules/rocky-activate.md`](src/rules/rocky-activate.md) into your personal preferences in Settings.
+- **Cowork**: start a new task, then use `/rocky` or say "rocky mode".
+- **Claude Code**: the account copy arrives the next time you start Claude Code signed in to that account. If you also installed rocky from the Claude Code command line, check `claude plugin list` and disable one copy, so the rules don't load twice.
+
+Why a command-line install didn't show up: plugins installed from the Claude Code command line stay on that one machine and never reach your Claude account, so the apps and Cowork can't see them.
+
+> Steps follow Claude's [plugin docs](https://claude.com/docs/plugins/overview). We have not yet checked them end to end on a real account: the marketplace add from this repo, the skill appearing on Android, and whether rocky's auto-start runs in Cowork. If a step differs for you, [open an issue](https://github.com/Theralley/rocky-skill/issues).
+
+### GitHub Copilot in VS Code (agent plugin)
+
+VS Code can install plugins in Claude's format, and this repo is one.
+
+1. Turn on agent plugins with the `chat.plugins.enabled` setting.
+2. Open the Command Palette, run **Chat: Install Plugin From Source**, and paste `https://github.com/Theralley/rocky-skill`.
+3. In Copilot Chat, pick `rocky` from the `/` menu or say "rocky mode".
+
+Expect skills only, and no auto-start: VS Code reads a Claude plugin's hooks from a file rocky does not ship. We have not tested this path yet. For rocky on every Copilot reply in one repo, run `npx -y github:Theralley/rocky-skill -- --only copilot --with-init` at the repo root. It writes Copilot's rule file, `.github/copilot-instructions.md`, and also adds rule files for Cursor, Windsurf, Cline and `AGENTS.md`.
+
+### Kiro (IDE and CLI)
+
+`npx skills add Theralley/rocky-skill -a kiro-cli -g` puts rocky in `~/.kiro/skills/`. Kiro IDE and kiro-cli both load skills from there, so one install covers both. Say "rocky mode" to start it.
+
+Want it on for every Kiro chat? Add a global steering file with `inclusion: always`:
+
+```bash
+mkdir -p ~/.kiro/steering
+printf '%s\n' '---' 'inclusion: always' '---' '' > ~/.kiro/steering/rocky.md
+curl -fsSL https://raw.githubusercontent.com/Theralley/rocky-skill/main/src/rules/rocky-activate.md >> ~/.kiro/steering/rocky.md
+```
+
+The steering format comes from [Kiro's docs](https://kiro.dev/docs/steering/); we have not tested it in Kiro ourselves. Delete the file to turn it off.
+
+### nanocoder
+
+No native install. nanocoder reads the `AGENTS.md` at your project root into its system prompt (its `nano` profile leaves it out unless you turn on **Include AGENTS.md**). Put rocky's always-on rule there, once per repo:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Theralley/rocky-skill/main/src/rules/rocky-activate.md >> AGENTS.md
+```
+
+Run it once; a second run adds a second copy. `npx -y github:Theralley/rocky-skill -- --with-init` is safe to re-run and writes the same rule into `AGENTS.md`, but it also installs rocky into every other agent it finds on your machine and adds rule files for Cursor, Windsurf, Cline and Copilot. Not tested in nanocoder by us yet.
+
+### Dev containers, Codespaces, remote machines
+
+A dev container has its own home folder. Rocky installed on your laptop (`~/.codex/skills`, `~/.claude`, and so on) is not inside it. Two ways that work:
+
+1. **Ship rocky with the repo.** At the repo root, run the skills install *without* `-g`, then commit the folder it creates. Every container and teammate gets rocky. For Codex:
+
+   ```bash
+   npx skills add Theralley/rocky-skill -a codex --copy
+   ```
+
+   Codex reads project skills from `.agents/skills/`. Skill files copied anywhere else are not found.
+2. **Install when the container is built.** In `.devcontainer/devcontainer.json` (the image needs Node.js):
+
+   ```json
+   "postCreateCommand": "npx -y skills add Theralley/rocky-skill --skill '*' -a codex -g -y"
+   ```
+
+Swap `codex` for your agent's profile from the table above. Claude Code inside a container needs its own install too: run the Claude Code plugin commands, or the installer, inside the container.
 
 ## Manual install (no `curl | bash`)
 
@@ -88,42 +300,50 @@ git clone https://github.com/Theralley/rocky-skill.git
 cd rocky
 
 # Preview every command the installer would run
-node bin/install.js --dry-run --all
+node installer/install.js --dry-run --all
 
 # Inspect the agent matrix
-node bin/install.js --list
+node installer/install.js --list
 
 # Install for everything detected
-node bin/install.js --all
+node installer/install.js --all
 ```
 
 Useful flags:
 
 | Flag | What |
 |---|---|
-| `--all` | Plugin + hooks + statusline + MCP shrink + per-repo rule files in `$PWD`. The full ride. |
+| `--all` | Plugin + hooks + statusline + per-repo rule files in `$PWD`. (MCP shrink is opt-in — see `--with-mcp-shrink` below.) |
 | `--minimal` | Plugin / extension only. No hooks, no MCP shrink, no per-repo rules. |
 | `--only <id>` | One agent only. Repeatable: `--only claude --only cursor`. |
 | `--dry-run` | Print every command. Write nothing. |
 | `--with-init` | Drop always-on rule files into the current repo (`.cursor/`, `.windsurf/`, `.clinerules/`, `.github/copilot-instructions.md`, `.opencode/AGENTS.md`, `AGENTS.md`) and, if OpenClaw is on the box, append the bootstrap block to `~/.openclaw/workspace/SOUL.md`. |
-| `--with-mcp-shrink` | Register `rocky-shrink` MCP proxy. **On by default.** Optional: source ships in this repo, but the npm package is not published on npm yet, so installer skips it cleanly when npm has no package metadata. |
-| `--no-mcp-shrink` | Skip MCP-shrink registration. |
-| `--with-hooks` / `--no-hooks` | Force-on or force-off the Claude Code hook installer. (Default: on.) |
+| `--with-mcp-shrink="<upstream cmd>"` | Register `rocky-shrink` MCP proxy wrapping the given upstream MCP server. **Off by default.** A value is required — rocky-shrink is a proxy and exits immediately without one. Example: `--with-mcp-shrink="npx @modelcontextprotocol/server-filesystem /tmp"`. Within the value, single or double quotes group paths containing spaces; backslashes stay literal. A JSON array of strings also works when arguments contain quotes. No shell expansion occurs. |
+| `--no-mcp-shrink` | Skip MCP-shrink registration. (Default.) |
+| `--with-hooks` / `--no-hooks` | Force-on or force-off the Claude Code hook installer, the Codex SessionStart hook, the Cursor sessionStart hook and the Copilot CLI session hook. (Default: auto. Codex, Cursor and Copilot CLI get their hook; Claude Code gets the hooks only when its plugin did not install, because the plugin already runs them.) |
 | `--skip-skills` | Don't run the npx-skills auto-detect fallback when nothing else matched. |
-| `--config-dir <path>` | Claude Code config dir for hook files + `settings.json`. **Does NOT scope** `claude plugin install`, `gemini extensions install`, opencode (`XDG_CONFIG_HOME`), or openclaw (`OPENCLAW_WORKSPACE`) — those use their own paths. Default: `$CLAUDE_CONFIG_DIR` or `~/.claude`. `~` is expanded. |
+| `--config-dir <path>` | Claude Code config dir for hook files + `settings.json`. **Does NOT scope** `claude plugin install`, `gemini extensions install`, Codex (`CODEX_HOME`), OMP (`~/.omp/`), opencode (`XDG_CONFIG_HOME`), or openclaw (`OPENCLAW_WORKSPACE`) — those use their own paths. Default: `$CLAUDE_CONFIG_DIR` or `~/.claude`. `~` is expanded. |
 | `--non-interactive` | Never prompt; use defaults. (Auto when stdin is not a TTY.) |
 | `--no-color` | Disable ANSI colors. |
 | `--list` | Print full agent matrix and exit. |
 | `--force` | Re-run even if already installed. |
 | `--uninstall` | Remove everything. See below. |
 
+For Windows paths containing spaces, pass a single quoted value from PowerShell:
+
+```powershell
+node installer/install.js --only opencode --with-mcp-shrink "'C:\Program Files\nodejs\node.exe' 'C:\MCP servers\server.js' 'C:\data folder\'"
+```
+
+The installer preserves each quoted path as one argument. For arguments containing quote characters, use a JSON array such as `--with-mcp-shrink='["node","server.js","path with spaces"]'`.
+
 ## Always-on rules
 
-For agents without a hook system (Cursor, Windsurf, Cline, Copilot, and friends), the always-on path is a static rule file. Two ways:
+For agents without a hook system (Windsurf, Cline, Copilot in VS Code, and friends), the always-on path is a static rule file. Two ways:
 
 ```bash
 # Drop rule files into the current repo
-node bin/install.js --with-init
+node installer/install.js --with-init
 
 # Or pull the rule body straight in (manual)
 curl -fsSL https://raw.githubusercontent.com/Theralley/rocky-skill/main/src/rules/rocky-activate.md \
@@ -139,25 +359,65 @@ After install, three quick checks:
 **1. See what got installed.**
 
 ```bash
-node bin/install.js --list
+node installer/install.js --list
 ```
 
 You should see ~30 rows. Detected agents are marked. Anything you wanted but isn't marked → not detected (likely the binary isn't on `PATH`).
 
 **2. Talk to Claude Code.**
 
-Open Claude Code, type `/rocky`. Response should be terse fragments — "Got it. Rocky mode on." or similar. Try a real question: "What is closures in JS?" — answer should drop articles and read like grunts.
+Open Claude Code, type `/rocky`. The reply should answer first, with no greeting or recap. Try a real question: "What is closures in JS?" — the answer should be short, articles optional, every technical term intact.
 
 **3. Check the flag file.**
 
 ```bash
 cat "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/.rocky-active"
-# expected output: full
+# expected output: rocky
 ```
 
 If it's missing or empty, the SessionStart hook didn't fire. See troubleshooting below.
 
-Statusline should show `[ROCKY]` (orange) at the bottom of Claude Code. After your first `/rocky-stats` run it appends a savings counter like `[ROCKY] 🪨 12.4k`.
+Each Claude Code window keeps its own mode in
+`${CLAUDE_CONFIG_DIR:-$HOME/.claude}/.rocky-sessions/`, one small file per
+session. The `.rocky-active` file above is a mirror of whichever window wrote
+most recently — handy for a quick "is rocky on", but with several windows open
+it shows one of them, not all. To see them all:
+
+```bash
+ls "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/.rocky-sessions/"
+```
+
+A window where you said "stop rocky" stores `off` and stays off — including
+across the automatic context compaction that happens in long sessions.
+
+Statusline should show `[ROCKY]` (orange) at the bottom of Claude Code. `/rocky-stats` reports recorded usage; savings remain unknown without a measured comparison.
+
+## Update
+
+**Claude Code.** The plugin is `rocky@rocky` — plugin name, then the
+marketplace it came from. Both are called `rocky`, so the short name looks
+right and fails: `claude plugin update rocky` answers *Failed to update
+plugin "rocky": Plugin "rocky" not found*. Use the full name:
+
+```bash
+claude plugin update rocky@rocky
+```
+
+`claude plugin list` shows what you have now. Restart Claude Code after an
+update — hooks are read once at session start.
+
+**Everything else:**
+
+| Agent | Update command |
+|---|---|
+| **Gemini CLI** | The Gemini CLI owns its extensions — see `gemini extensions --help` for its update subcommand |
+| **Installed via `npx skills add`** | Re-run the same `npx skills add` command — it overwrites in place |
+| **Hooks / opencode / OpenClaw / rule files** | Re-run the installer; it is idempotent for everything it owns |
+
+```bash
+# Re-run the installer (safe to repeat — overwrites only installer-owned files)
+npx -y github:Theralley/rocky-skill
+```
 
 ## Uninstall
 
@@ -165,19 +425,27 @@ Statusline should show `[ROCKY]` (orange) at the bottom of Claude Code. After yo
 npx -y github:Theralley/rocky-skill -- --uninstall
 ```
 
+
 What it removes:
 
 - Rocky hook entries from `$CLAUDE_CONFIG_DIR/settings.json` (default `~/.claude/`; matched by the substring `rocky`).
-- Hook files in `$CLAUDE_CONFIG_DIR/hooks/` (`rocky-activate.js`, `rocky-mode-tracker.js`, `rocky-stats.js`, `rocky-config.js`, `rocky-statusline.{sh,ps1}`, plus the dir's `package.json` marker).
+- Hook files in `$CLAUDE_CONFIG_DIR/hooks/` (`rocky-activate.js`, `rocky-mode-tracker.js`, `rocky-parse.js`, `rocky-stats.js`, `rocky-config.js`, `rockycrew-model-overrides.js`, `rocky-statusline.{sh,ps1}`, plus the dir's `package.json` marker).
 - The Claude Code plugin and the Gemini CLI extension (if installed).
 - The opencode native plugin (`~/.config/opencode/plugins/rocky/`, the `plugin` and `mcp.rocky-shrink` entries from `opencode.json`, our skill/agent/command files, the rocky block from `AGENTS.md`, and the opencode flag file).
+- The Codex SessionStart entry from `$CODEX_HOME/hooks.json` (default `~/.codex/`; other hooks stay) and the hook files under `$CODEX_HOME/rocky/`. The file goes away only if rocky's entry was all it held.
+- The Oh My Pi plugin (`omp plugin uninstall rocky`) and Rocky's managed OMP plugin package at `~/.omp/rocky-plugin/`.
+- The Antigravity CLI plugin (`agy plugin uninstall rocky`).
+- Cursor: the Rockycrew agents in `~/.cursor/agents/`, `~/.cursor/rocky/`, and rocky's entry in `~/.cursor/hooks.json`.
+- The Copilot CLI session hook: `$COPILOT_HOME/hooks/rocky.json` and `$COPILOT_HOME/rocky/` (default `~/.copilot/`).
 - The OpenClaw workspace skill folder and the marker-fenced block from `~/.openclaw/workspace/SOUL.md` (when present).
-- The `.rocky-active` flag file.
+- Owned native skill copies (Continue, AiderDesk, Antigravity, Grok Build, and iFlow/Crush with a custom home) and the marker-fenced block from `$GROK_HOME/AGENTS.md` (default `~/.grok/AGENTS.md`). Your own text in that file stays.
+- All mode state in `$CLAUDE_CONFIG_DIR`: the `.rocky-sessions/` directory (one file per window), `.rocky-active`, `.rocky-active.prev`, `.rocky-mode-log.jsonl`, `.rocky-statusline-suffix`, `.rocky-nudge-shown`, and `.rocky-statusline-stale`.
 
 What it does **not** remove:
 
-- Skills installed via `npx skills add` — the `skills` CLI manages those. Run `npx skills remove rocky` (or use your IDE's skill manager).
+- Skills installed via `npx skills add` — the `skills` CLI manages those. Remove them with `npx skills remove Theralley/rocky-skill -g`. It lists the skills and asks before deleting. It clears those names from every agent's folder, so if you keep a skill of your own with one of them, add `-a <agent>` with the name after `-a` in that agent's row above to limit it. Replit: run it inside the project, without `-g`.
 - Per-repo rule files written by `--with-init` (`.cursor/rules/`, `.windsurf/rules/`, `.clinerules/`, `.github/copilot-instructions.md`, `.opencode/AGENTS.md`, `AGENTS.md`). Delete by hand if you want.
+- `$CLAUDE_CONFIG_DIR/.rocky-history.jsonl`, which keeps lifetime stats. Delete it manually if you want history removed too.
 
 ## Troubleshooting
 
@@ -193,10 +461,33 @@ Still broken? [Open an issue](https://github.com/Theralley/rocky-skill/issues).
 
 **"I ran the installer but Claude Code isn't talking rocky."**
 
-1. Run `node bin/install.js --list` — confirm `claude` is on the detected list. If not, `claude` isn't on `PATH`. Fix that first.
+1. Run `node installer/install.js --list` — confirm `claude` is on the detected list. If not, `claude` isn't on `PATH`. Fix that first.
 2. Open `$CLAUDE_CONFIG_DIR/settings.json` (default `~/.claude/settings.json`) and look for `"hooks"` containing `rocky-activate.js` and `rocky-mode-tracker.js`. If missing, re-run with `--force`.
-3. Check `$CLAUDE_CONFIG_DIR/.rocky-active` exists with content `full`. If not, the SessionStart hook silent-failed — check `$CLAUDE_CONFIG_DIR/hooks/` for the JS files and try `node $CLAUDE_CONFIG_DIR/hooks/rocky-activate.js < /dev/null` to see if it errors.
+3. Check `$CLAUDE_CONFIG_DIR/.rocky-active` exists with content `rocky`. If not, the SessionStart hook silent-failed — check `$CLAUDE_CONFIG_DIR/hooks/` for the JS files and try `node $CLAUDE_CONFIG_DIR/hooks/rocky-activate.js < /dev/null` to see if it errors. Keep the `< /dev/null`: the hook reads its payload from stdin, and a pipe that never closes makes it wait out its 2s watchdog.
 4. Restart Claude Code. The SessionStart hook only fires on session start, not mid-session.
+
+**"There is no `node` on this machine."**
+
+Rocky turns itself on through small Node.js scripts, so auto-activation needs Node.js 18 or newer on `PATH`. Without it the plugin steps aside quietly (no hook errors) and rocky starts only when you type `/rocky` in a session. Install Node from [nodejs.org](https://nodejs.org) to get auto-activation back. Standalone hooks remember the `node` path they were installed with; if you moved or removed that Node, re-run the installer.
+
+**"One window is rocky, another isn't."**
+
+That's intended. Mode is per window. Say `/rocky` in the window you want it in.
+`${CLAUDE_CONFIG_DIR:-$HOME/.claude}/.rocky-sessions/` has one file per session
+if you want to see the current state of each.
+
+**"I also run ponytail (or another style plugin). Which one wins?"**
+
+Both apply. Ponytail decides how much code gets written; rocky decides how the reply reads. Ponytail's own instructions say to pair it with rocky. Want only one? Say `stop rocky` in that window, or set `"defaultMode": "manual"` in `~/.config/rocky/config.json` so rocky starts off until you type `/rocky`.
+
+**"I said 'stop rocky' and it came back on its own."**
+
+Fixed. This used to happen when a long conversation hit automatic context
+compaction: the SessionStart hook re-ran and re-applied your configured default.
+Deactivation is now stored as a durable value that survives compaction and
+resume. If you still see it, check whether `ROCKY_DEFAULT_MODE` or a repo-local
+`.rocky.json` is re-arming it on a genuinely new session, or whether you ran
+`/clear` — that is a deliberate reset, and intended.
 
 **"Hooks failing on Windows."**
 
@@ -207,7 +498,7 @@ Still broken? [Open an issue](https://github.com/Theralley/rocky-skill/issues).
 
 **"My `settings.json` got mangled."**
 
-The installer uses a JSONC-tolerant parser (`bin/lib/settings.js`) so comments and trailing commas don't crash the merge. It also runs `validateHookFields()` before every write so a malformed hook can't poison the file. If something still went wrong:
+The installer uses a JSONC-tolerant parser (`installer/lib/settings.js`) so comments and trailing commas don't crash the merge. It also runs `validateHookFields()` before every write so a malformed hook can't poison the file. If something still went wrong:
 
 1. Check for a backup at `$CLAUDE_CONFIG_DIR/settings.json.bak` (installer writes one before any merge).
 2. If no backup, restore from your shell history or version control.
@@ -215,17 +506,18 @@ The installer uses a JSONC-tolerant parser (`bin/lib/settings.js`) so comments a
 
 **"I'm in a managed env where I can't install hooks."**
 
-Use the rule-file-only path. Hooks are Claude Code-specific; everything else works via static rule files:
+Use the rule-file-only path. Static rule files need no hook:
 
 ```bash
-# Just install for one agent, no Claude hooks
-node bin/install.js --only cursor
+# Skills for one agent, no hooks (still writes that agent's skills, and for Cursor the Rockycrew agents, in your home folder)
+node installer/install.js --only cursor --no-hooks
 
-# Or write rule files into the current repo only (no global state)
-node bin/install.js --with-init --only cursor --only windsurf
+# Or write rule files into the current repo only (no global state), one agent per run
+node src/tools/rocky-init.js --only cursor
+node src/tools/rocky-init.js --only windsurf
 ```
 
-This drops `.cursor/rules/rocky.mdc` (and friends) into your repo. No hooks, no global config, nothing outside the repo.
+The second form drops `.cursor/rules/rocky.mdc` and `.windsurf/rules/rocky.md` into your repo. No hooks, no global config, nothing outside the repo. (`--with-init` on the installer is not repo-only: it also runs the normal install for every agent.)
 
 **"`npx skills add` errored on a profile slug."**
 
@@ -238,9 +530,12 @@ The installer doesn't phone home. It writes to:
 - `$CLAUDE_CONFIG_DIR` (default `~/.claude/`) — hooks, flag file, `settings.json` merge.
 - Each agent's own config location — Cursor's `.cursor/rules/`, Windsurf's `.windsurf/rules/`, opencode's `~/.config/opencode/`, etc.
 - Your current working directory (only with `--with-init`) — repo-local rule files.
+- `$CODEX_HOME` (default `~/.codex/`; only when Codex is detected or selected, and not with `--no-hooks`) — the rocky hook files in `rocky/`, one entry in `hooks.json`, and an ownership record.
+- `~/.omp/rocky-plugin/` (only with `--only omp`, or auto-detect when `omp` is on `PATH`) — managed OMP plugin package installed through `omp plugin install`.
 - `~/.openclaw/workspace/` (only with `--only openclaw` or `--with-init` when OpenClaw is detected) — the one `--with-init` side-effect outside the cwd.
 
-No telemetry. No analytics. The installer's own code makes no network calls. Network requests do happen indirectly through the per-agent CLIs it shells out to — `claude plugin marketplace add`, `claude plugin install`, `gemini extensions install`, `npm view rocky-shrink` (optional probe; may 404 until the package is published), and `npx -y skills add`. Each fetches from its own registry (Anthropic / GitHub / npm). Source: [`bin/install.js`](bin/install.js).
+Installer sends no Rocky telemetry or analytics. Run from a clone or via npx, its own code copies files locally. One exception: run detached from any checkout (the rare curl-fallback path), it downloads hook files from raw.githubusercontent.com pinned to the release tag and checks each against the SHA-256 manifest committed at that same tag before wiring anything. The manifest catches corrupt or partial downloads; because it comes from the same tag, it cannot detect a tag that was moved. Network requests also happen indirectly through per-agent CLIs it shells out to — `claude plugin marketplace add`, `claude plugin install`, `gemini extensions install`, `omp plugin install`, `npm view rocky-shrink`, and `npx -y skills add`. Each fetches from its own registry or local plugin manager (Anthropic / GitHub / OMP / npm). Source: [`installer/install.js`](installer/install.js).
+
 
 ---
 

@@ -29,7 +29,7 @@ def count(text: str) -> int:
 
 
 def main() -> None:
-    data = json.loads(SNAPSHOT.read_text())
+    data = json.loads(SNAPSHOT.read_text(encoding="utf-8"))
     arms = data["arms"]
     meta = data.get("metadata", {})
 

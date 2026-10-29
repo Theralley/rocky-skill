@@ -50,7 +50,7 @@ def main() -> None:
         print(f"No snapshot at {SNAPSHOT}. Run `python evals/llm_run.py` first.")
         return
 
-    data = json.loads(SNAPSHOT.read_text())
+    data = json.loads(SNAPSHOT.read_text(encoding="utf-8"))
     arms = data["arms"]
     meta = data.get("metadata", {})
 

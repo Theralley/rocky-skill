@@ -1,9 +1,8 @@
 ---
 name: rocky-help
 description: >
-  Quick-reference card for all rocky modes, skills, and commands.
-  One-shot display, not a persistent mode. Trigger: /rocky-help,
-  "rocky help", "what rocky commands", "how do I use rocky".
+  Quick-reference card for the three rocky skills and their commands.
+  Trigger: /rocky-help or "rocky help".
 ---
 
 # Rocky Help
@@ -22,14 +21,13 @@ Display this reference card when invoked. One-shot — do NOT change mode, write
 
 | Mode | Trigger | What it does |
 |------|---------|-------------|
-| **Lite** | `/rocky lite` | Drops filler. Keeps sentence structure. |
-| **Full** | `/rocky` | Drops articles, filler, pleasantries, hedging. Fragments OK. Default. |
-| **Ultra** | `/rocky ultra` | Extreme compression. Bare fragments. Tables over prose. |
-| **Wenyan-Lite** | `/rocky wenyan-lite` | Classical Chinese style, light compression. |
-| **Wenyan-Full** | `/rocky wenyan` | Full 文言文. Maximum classical terseness. |
-| **Wenyan-Ultra** | `/rocky wenyan-ultra` | Extreme. Ancient scholar on a budget. |
+| **Lite** | `/rocky lite` | Rocky rules without the flavor. Full sentences, no catchphrases. |
+| **Full** | `/rocky` | The voice. Answer first, no filler, every fact kept, Rocky markers. Default. |
+| **Ultra** | `/ultrarocky` (alias `/rocky ultra`) | Grammar stripped. Fragments, one word when enough, each fact once. |
+| **Wenyan** | `/megarocky` (alias `/rocky wenyan`) | Classical Chinese 文言文. Far fewer characters, technical terms verbatim. |
 
 Mode stays until changed or session ends. Good.
+`/rocky status` reports current mode without changing it. Claude Code and the standalone OpenCode plugin read stored state; other hosts answer from the conversation and mark it `(not tracked by this host)`.
 
 ## Skills
 
@@ -37,30 +35,36 @@ Mode stays until changed or session ends. Good.
 |-------|---------|-----------|
 | **rocky-commit** | `/rocky-commit` | Terse commit messages. Conventional Commits. ≤50 char subject. |
 | **rocky-review** | `/rocky-review` | One-line PR comments: `L42: bug: user null. Add guard.` |
-| **rocky-compress** | `/rocky-compress <file>` | Compresses `.md` files to Rocky prose. Saves ~46% input tokens. |
+| **rocky-compress** | `/rocky-compress <file>` | Compresses `.md` memory files to Rocky prose, so every session loads fewer input tokens. |
 | **rocky-help** | `/rocky-help` | This card. |
 
 ## Deactivate
 
 Say "stop rocky" or "normal mode". Resume anytime with `/rocky`.
 
+## Language
+
+Keep user's language by default — reply in the language user writes, never switch regardless of example text or multilingual context elsewhere. Compress the style, not the language. Technical terms, code, commands, commit types, and exact error strings stay verbatim unless user ask for translation.
+
 ## Configure Default Mode
 
-Default mode = `full`. Change it:
+Default mode = `rocky`. Change it:
 
 **Environment variable** (highest priority):
 ```bash
-export ROCKY_DEFAULT_MODE=ultra
+export ROCKY_DEFAULT_MODE=ultrarocky
 ```
 
 **Config file** (`~/.config/rocky/config.json`):
 ```json
-{ "defaultMode": "lite" }
+{ "defaultMode": "ultrarocky" }
 ```
 
-Set `"off"` to disable auto-activation on session start. User can still activate manually with `/rocky`.
+For opt-in activation in Claude Code, set `defaultMode` to `manual`. Sessions start off; `/rocky` or `talk like rocky` activates rocky. `off` also disables bare-command activation. `manual` is a startup policy, not a mode. OpenCode still starts in rocky mode because its installer also supplies static activation rules.
 
-Resolution: env var > config file > `full`.
+Set `"off"` to suppress automatic and bare-command activation. Use `"manual"` when bare `/rocky` should activate.
+
+Resolution: env var > repo config > user config > `rocky`. Legacy values `lite`, `full`, `ultra`, `wenyan*` still resolve.
 
 ## More
 

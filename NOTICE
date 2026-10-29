@@ -1,0 +1,24 @@
+Rocky
+Copyright 2026 Theralley
+
+Rocky is a fork of Caveman (https://github.com/JuliusBrussee/caveman),
+re-themed around Rocky the Eridian from Andy Weir's Project Hail Mary.
+
+Caveman
+Copyright 2026 Julius Brussee
+
+Caveman is licensed under the Apache License, Version 2.0, from Caveman 3.0.0
+on. Rocky 1.1.0 and later include Caveman code up to upstream commit 9b68f7e
+(after Caveman 4.0.1), renamed from caveman to rocky and modified for the
+Rocky voice. The full change history is in this repository's git log.
+
+Code taken from Caveman before 3.0.0 was released under the MIT License; that
+copyright and permission notice is kept verbatim in LICENSE-MIT. Rocky releases
+before 1.1.0 were MIT-licensed by Theralley and keep those terms; Theralley
+licenses Rocky's own changes under Apache-2.0 from 1.1.0 on.
+
+"Caveman" and the Caveman logos are trademarks of Julius Brussee. Rocky is an
+independent fork and is not affiliated with or endorsed by Caveman or
+Julius Brussee.
+
+Third-party notices: src/mcp-servers/rocky-shrink/NOTICE.

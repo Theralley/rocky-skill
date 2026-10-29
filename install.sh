@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # rocky — installer shim.
 #
-# Thin wrapper around bin/install.js (the unified Node installer). Every flag
-# you'd pass to bin/install.js can be passed here; we just forward them.
+# Thin wrapper around installer/install.js (the unified Node installer). Every flag
+# you'd pass to installer/install.js can be passed here; we just forward them.
 #
 # One-line install:
-#   curl -fsSL https://raw.githubusercontent.com/Theralley/rocky-skill/main/install.sh | bash
-#   curl -fsSL https://raw.githubusercontent.com/Theralley/rocky-skill/main/install.sh | bash -s -- --all
+#   curl -fsSL https://raw.githubusercontent.com/Theralley/rocky-skill/v1.1.0/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/Theralley/rocky-skill/v1.1.0/install.sh | bash -s -- --all
 #
 # Local clone:
 #   bash install.sh [flags]
@@ -18,6 +18,7 @@
 set -euo pipefail
 
 REPO="Theralley/rocky-skill"
+PINNED_REF="${ROCKY_REF:-v1.1.0}"
 
 # Require Node ≥18. nvm is a common path; print a hint if missing.
 if ! command -v node >/dev/null 2>&1; then
@@ -36,19 +37,37 @@ fi
 
 # If we're inside the repo clone, run the local installer directly — saves
 # the npx round-trip and keeps offline installs working. BASH_SOURCE is unset
-# when bash is invoked from stdin (curl | bash), and `set -u` would trip on a
-# bare reference — default to empty so the curl-pipe path falls through cleanly.
-here="$(cd "$(dirname "${BASH_SOURCE[0]:-}")" 2>/dev/null && pwd)" || here=""
-if [ -n "$here" ] && [ -f "$here/bin/install.js" ]; then
-  exec node "$here/bin/install.js" "$@"
+# when bash is invoked from stdin (curl | bash). Do not feed an empty value to
+# dirname: dirname "" resolves to "." and would execute an unrelated
+# $PWD/installer/install.js from the caller's checkout.
+here=""
+source_path="${BASH_SOURCE[0]:-}"
+if [ -n "$source_path" ]; then
+  here="$(cd "$(dirname "$source_path")" 2>/dev/null && pwd)" || here=""
+fi
+if [ -n "$here" ] && [ -f "$here/installer/install.js" ]; then
+  exec node "$here/installer/install.js" "$@"
 fi
 
 # Curl-pipe path: delegate to npx. We do NOT pass `--` here — npm 7+ npx
 # already forwards trailing args to the package, and a literal `--` tripped
-# bin/install.js's parseArgs as an unknown flag.
+# installer/install.js's parseArgs as an unknown flag.
 if ! command -v npx >/dev/null 2>&1; then
   echo "rocky: npx required (ships with Node ≥18). Reinstall Node.js." >&2
   exit 1
 fi
 
-exec npx -y "github:$REPO" "$@"
+# npm 12 disables git package fetches by default (EALLOWGIT). Allow only the
+# root package requested here; keep the old invocation for npm versions that
+# predate this config flag.
+NPX_VERSION=""
+if NPX_VERSION=$(npx --version 2>/dev/null); then :; fi
+NPX_MAJOR=${NPX_VERSION%%.*}
+case "$NPX_MAJOR" in
+  ''|*[!0-9]*) NPX_MAJOR=0 ;;
+esac
+
+if [ "$NPX_MAJOR" -ge 12 ]; then
+  exec npx --allow-git=root -y "github:$REPO#$PINNED_REF" "$@"
+fi
+exec npx -y "github:$REPO#$PINNED_REF" "$@"

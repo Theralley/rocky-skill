@@ -18,7 +18,7 @@ The repo distributes one skill (rocky) plus a handful of sub-skills
 (rocky-commit, rocky-review, rocky-compress, rockycrew-*) to many
 agents through different distribution mechanisms (Claude Code plugin, Codex
 plugin, Gemini extension, Cursor/Windsurf/Cline rule files, `npx skills` for
-the long tail). A single Node installer at `bin/install.js` detects which
+the long tail). A single Node installer at `installer/install.js` detects which
 agents are on the user's machine and installs the right thing for each.
 
 Sources of truth live at the **top level** of the repo. Agent-specific
@@ -39,10 +39,10 @@ copies live under `plugins/rocky/` and similar mirror dirs — those are
 | Rockycrew decision guide (when to delegate to subagents) | `skills/rockycrew/SKILL.md` |
 | rockycrew subagent definitions | `agents/rockycrew-investigator.md`, `agents/rockycrew-builder.md`, `agents/rockycrew-reviewer.md` |
 | Auto-activation rule body (Cursor/Windsurf/Cline/Copilot) | `src/rules/rocky-activate.md` |
-| Add support for a new agent | `bin/install.js` (PROVIDERS array) |
+| Add support for a new agent | `installer/install.js` (PROVIDERS array) |
 | Per-repo init script (drops rule files into a user's repo) | `src/tools/rocky-init.js` |
 | Claude Code hooks | `src/hooks/rocky-activate.js`, `src/hooks/rocky-mode-tracker.js`, `src/hooks/rocky-config.js`, `src/hooks/rocky-statusline.sh`, `src/hooks/rocky-statusline.ps1` |
-| Settings.json read/write helpers | `bin/lib/settings.js` |
+| Settings.json read/write helpers | `installer/lib/settings.js` |
 | MCP shrink server | `src/mcp-servers/rocky-shrink/` |
 
 That's it. Every other markdown file with `SKILL.md` in the path is a copy.
@@ -72,7 +72,7 @@ dotdir mirror, it's a build artifact. Edit the top-level source instead.
 
 ## Adding a new agent
 
-The unified Node installer at `bin/install.js` is the **single source of
+The unified Node installer at `installer/install.js` is the **single source of
 truth** for the supported-agent list. The README and `INSTALL.md` install
 tables mirror it by hand — bash and PowerShell shims at the repo root just
 delegate to it.
@@ -80,16 +80,16 @@ delegate to it.
 1. Confirm the agent has a distribution path. Either:
    - it has a profile slug in upstream [vercel-labs/skills](https://github.com/vercel-labs/skills) (most common), or
    - it has a native plugin / extension / rule-file mechanism we can target.
-2. Append a row to the `PROVIDERS` array in `bin/install.js`. Each row needs:
+2. Append a row to the `PROVIDERS` array in `installer/install.js`. Each row needs:
    - `id` — short kebab-case identifier (e.g. `windsurf`)
    - `label` — human display name (e.g. `Windsurf`)
    - `mech` — distribution mechanism (`plugin`, `extension`, `rules-file`, `skills-cli`, …)
    - `detect` — clause spec like `command:foo||dir:$HOME/x` describing how to detect the agent
    - `profile` — the vercel-labs/skills slug, if applicable
    - `soft: true` — set when detection is config-dir-only (best-effort)
-3. Run `node bin/install.js --list` and confirm the new row renders correctly. Soft probes should show as `(soft)`.
+3. Run `node installer/install.js --list` and confirm the new row renders correctly. Soft probes should show as `(soft)`.
 4. Add a row to the install tables in `README.md` and `INSTALL.md`.
-5. No CI changes needed — the workflow re-reads `bin/install.js` automatically.
+5. No CI changes needed — the workflow re-reads `installer/install.js` automatically.
 
 Bad slug? `npx skills add` fails at install **runtime**, not at install-script
 load. Always verify the slug against the vercel-labs/skills README before
@@ -174,11 +174,11 @@ PR descriptions don't need to be long. Rocky style fine. Just say what change, w
 A handful of invariants that have bitten us before. Keep them.
 
 - **Hooks must silent-fail on filesystem errors.** A `try/catch` that swallows the error is correct here. A hook that throws blocks Claude Code session start — that's user-facing breakage. See existing patterns in `src/hooks/rocky-activate.js`.
-- **Settings.json reads and writes go through `bin/lib/settings.js`.** It tolerates JSONC comments. Direct `JSON.parse` on a user's `settings.json` will crash on a single `// comment`.
-- **Validate hook entries before writing.** Use `validateHookFields()` in `bin/lib/settings.js`. Claude Code's Zod schema silently discards the **entire** `settings.json` on a single bad hook entry — one malformed write poisons the user's whole config.
+- **Settings.json reads and writes go through `installer/lib/settings.js`.** It tolerates JSONC comments. Direct `JSON.parse` on a user's `settings.json` will crash on a single `// comment`.
+- **Validate hook entries before writing.** Use `validateHookFields()` in `installer/lib/settings.js`. Claude Code's Zod schema silently discards the **entire** `settings.json` on a single bad hook entry — one malformed write poisons the user's whole config.
 - **Symlink-safe flag writes via `safeWriteFlag()`** in `src/hooks/rocky-config.js`. The flag file lives at a predictable path under `$CLAUDE_CONFIG_DIR/`; without `O_NOFOLLOW` and a parent-symlink check, a local attacker can clobber any file the user can write.
 - **Honor `CLAUDE_CONFIG_DIR`.** Hooks, the installer, and the statusline scripts must respect it — never hardcode `~/.claude`.
-- **`install.sh` and `install.ps1` at the repo root are 30-line shims** that delegate to `bin/install.js`. Don't re-add per-OS install logic to them. Quoting bugs that way lie.
+- **`install.sh` and `install.ps1` at the repo root are 30-line shims** that delegate to `installer/install.js`. Don't re-add per-OS install logic to them. Quoting bugs that way lie.
 
 ---
 
