@@ -5,6 +5,8 @@ on:
     branches: [main]
     paths:
       - skills/rocky/SKILL.md
+      - skills/ultrarocky/SKILL.md
+      - skills/megarocky/SKILL.md
       - skills/rockycrew/SKILL.md
       - agents/rockycrew-*.md
       - skills/rocky-compress/SKILL.md
@@ -20,9 +22,10 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
         with:
           ref: main
+          persist-credentials: false
 
       - name: Pull latest before making changes
         run: |
@@ -33,6 +36,9 @@ jobs:
       - name: Sync SKILL.md copies
         run: |
           cp skills/rocky/SKILL.md plugins/rocky/skills/rocky/SKILL.md
+          mkdir -p plugins/rocky/skills/ultrarocky plugins/rocky/skills/megarocky
+          cp skills/ultrarocky/SKILL.md plugins/rocky/skills/ultrarocky/SKILL.md
+          cp skills/megarocky/SKILL.md plugins/rocky/skills/megarocky/SKILL.md
 
       - name: Sync rocky-compress skill to plugin
         run: |
@@ -52,14 +58,22 @@ jobs:
           cp agents/rockycrew-reviewer.md plugins/rocky/agents/rockycrew-reviewer.md
 
       - name: Rebuild rocky.skill ZIP
-        run: mkdir -p dist && cd skills && zip -r ../dist/rocky.skill rocky/
+        # `zip -r` ADDS to an existing archive, and dist/rocky.skill is tracked
+        # (.gitignore keeps it with `!dist/rocky.skill`), so a file deleted from
+        # skills/rocky/ never left the shipped ZIP — it just stopped being
+        # updated. Delete first so the archive is genuinely rebuilt.
+        run: mkdir -p dist && rm -f dist/rocky.skill && cd skills && zip -r ../dist/rocky.skill rocky/
 
       - name: Commit and push if changed
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           git add \
             skills/rocky-compress/ \
             plugins/rocky/skills/rocky-compress/ \
             plugins/rocky/skills/rocky/SKILL.md \
+            plugins/rocky/skills/ultrarocky/SKILL.md \
+            plugins/rocky/skills/megarocky/SKILL.md \
             plugins/rocky/skills/rockycrew/SKILL.md \
             plugins/rocky/agents/rockycrew-investigator.md \
             plugins/rocky/agents/rockycrew-builder.md \
@@ -67,4 +81,6 @@ jobs:
             dist/rocky.skill
           git diff --staged --quiet && exit 0
           git commit -m "chore: sync SKILL.md copies [skip ci]"
-          git push
+          git config --local credential.helper '!f() { echo "username=x-access-token"; echo "password=$GITHUB_TOKEN"; }; f'
+          git push "https://github.com/${GITHUB_REPOSITORY}.git" HEAD:main
+          git config --local --unset credential.helper

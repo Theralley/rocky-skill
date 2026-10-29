@@ -1,17 +1,12 @@
 ---
 name: rockycrew
 description: >
-  Decision guide for delegating to rocky-style subagents. Tells the main
-  thread WHEN to spawn `rockycrew-investigator` (locate code), `rockycrew-builder`
-  (1-2 file edit), or `rockycrew-reviewer` (diff review) instead of doing the
-  work inline or using vanilla `Explore`. Subagent output is rocky-compressed
-  so the tool-result injected back into main context is ~60% smaller — main
-  context lasts longer across long sessions.
-  Trigger: "delegate to subagent", "use rockycrew", "spawn investigator/builder/reviewer",
-  "save context", "compressed agent output".
+  When to delegate to `rockycrew-investigator` (locate code), `rockycrew-builder`
+  (1-2 file edit) or `rockycrew-reviewer` (diff review) instead of working inline
+  or using `Explore`. Their output is compressed, so main context lasts longer.
 ---
 
-Rockycrew = three subagent presets that emit rocky output. Same job as Anthropic defaults (`Explore`, edit-style agents, reviewer); difference is the tool-result they return is compressed, so main context shrinks per delegation.
+Rockycrew = three subagent presets that answer in ultrarocky voice (tool runs: one status line in, one out; nothing between routine calls). Same job as Anthropic defaults (`Explore`, edit-style agents, reviewer); difference is the tool-result they return is compressed, so main context shrinks per delegation.
 
 ## When to use rockycrew vs alternatives
 
@@ -20,16 +15,16 @@ Rockycrew = three subagent presets that emit rocky output. Same job as Anthropic
 | "Where is X defined / what calls Y / list uses of Z" | `rockycrew-investigator` |
 | Same but you also want suggestions/architecture commentary | `Explore` (vanilla) |
 | Surgical edit, ≤2 files, scope obvious | `rockycrew-builder` |
-| New feature / 3+ files / cross-cutting refactor | Main thread or `feature-dev:code-architect` |
+| New feature / 3+ files / cross-cutting refactor | Main thread, or `feature-dev:code-architect` if installed |
 | Review diff, branch, or file for bugs | `rockycrew-reviewer` |
-| Deep code review with rationale + alternatives | `Code Reviewer` (vanilla) |
+| Deep code review with rationale + alternatives | `Code Reviewer` (vanilla) if installed, else main thread |
 | One-line answer you already know | Main thread, no subagent |
 
 Rule of thumb: **if you'd want the subagent's output in 1/3 the tokens, pick rockycrew. If you'd want prose, pick vanilla.**
 
 ## Why this exists (the real win)
 
-Subagent tool results get injected into main context verbatim. A vanilla `Explore` that returns 2k tokens of prose costs 2k tokens of main-context budget every time. The same finding from `rockycrew-investigator` returns ~700 tokens. Across 20 delegations in one session that's the difference between context exhaustion and finishing the task.
+Subagent tool results get injected into main context verbatim. A vanilla `Explore` that returns 2k tokens of prose costs 2k tokens of main-context budget every time. The same finding from `rockycrew-investigator` comes back as a compressed `path:line` table instead. Across 20 delegations in one session that's the difference between context exhaustion and finishing the task.
 
 ## Output contracts
 
@@ -74,7 +69,7 @@ Skip investigator. Hand exact path:line to `rockycrew-builder` directly.
 
 - Don't use `rockycrew-builder` when you don't already know the file. Spawn investigator first or main thread will eat tokens passing context.
 - Don't chain `rockycrew-investigator → rockycrew-builder` for a 5-file refactor. Builder will return `too-big.` and you'll have wasted a turn.
-- Don't ask `rockycrew-reviewer` for "general feedback" — it returns findings only, no architecture opinions. Use `Code Reviewer` for that.
+- Don't ask `rockycrew-reviewer` for "general feedback" — it returns findings only, no architecture opinions. Use `Code Reviewer` for that when installed.
 - Don't expect prose. Rockycrew output is structured, sometimes terse to the point of cryptic. If a human will read it directly, paraphrase.
 
 ## Auto-clarity (inherited)

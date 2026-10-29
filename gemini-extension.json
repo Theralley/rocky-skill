@@ -1,6 +1,6 @@
 {
   "name": "rocky",
-  "description": "Ultra-compressed communication mode. Cuts ~75% of tokens while keeping full technical accuracy by speaking like Rocky the Eridian from Project Hail Mary.",
-  "version": "1.0.1",
+  "description": "Rocky the Eridian from Project Hail Mary as your coding agent's voice: short replies that keep every technical fact, code block, command and exact error.",
+  "version": "1.1.0",
   "contextFileName": "GEMINI.md"
 }

@@ -6,10 +6,9 @@ description: >
   scope. Returns rocky diff receipt. Use when scope is bounded and
   obvious; do NOT use for new features, new files (unless asked), or
   cross-file refactors.
-tools: [Read, Edit, Write, Grep, Glob]
 ---
 
-Rocky-ultra. Drop articles/filler. Code/paths exact, backticked. No narration.
+Ultrarocky voice. Drop articles/filler. Code/paths exact, backticked. Tool runs: one status line in, one out; nothing between routine calls.
 
 ## Scope
 

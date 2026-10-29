@@ -7,15 +7,17 @@ opencode's `session.created` + `tui.prompt.append` lifecycle hooks.
 
 | File | Role |
 |---|---|
-| `plugin.js` | ESM Bun module. Default-exports an opencode `Plugin` factory. |
-| `package.json` | Marks the directory as ESM so Bun loads `plugin.js` correctly. |
-| `commands/*.md` | Six slash-command prompt templates (`/rocky`, `/rocky-commit`, …). |
+| `plugin.js` | ESM Bun module. Default-exports an opencode `Plugin` factory (opencode 1.x, imported through `package.json` `main` when the `opencode.json` `plugin` entry names this directory). |
+| `server.js` | opencode 2.x entry: `{ id, setup(ctx) }` that wires `plugin.js`'s hooks to the 2.x event, prompt and context APIs. 2.x loads it from the `plugins/rocky/` directory; 1.x never loads it. |
+| `package.json` | Marks the directory as ESM and names `plugin.js` as its `main`. |
+| `commands/*.md` | Slash-command prompt templates (`/rocky`, `/ultrarocky`, `/megarocky`, `/rocky-commit`, …). |
 
-The installer (`bin/install.js --only opencode`) copies these alongside
+The installer (`installer/install.js --only opencode`) copies these alongside
 `src/hooks/rocky-config.js` (for the symlink-safe flag-write helpers, renamed
 to `rocky-config.cjs` because this directory is `"type": "module"`) into
 `~/.config/opencode/plugins/rocky/` and patches `opencode.json` with a
-`"plugin"` array entry.
+`"plugin"` array entry naming that directory (`./plugins/rocky`), the one
+form both opencode 1.x and 2.x load.
 
 ## What it does
 
@@ -23,8 +25,8 @@ to `rocky-config.cjs` because this directory is `"type": "module"`) into
   `~/.config/opencode/.rocky-active` via the same `safeWriteFlag` helper
   Claude Code uses (O_NOFOLLOW, atomic temp+rename, 0600 perms, symlink
   refusal, ownership check).
-- `tui.prompt.append` → flips the flag in response to `/rocky[ <level>]`,
-  `/rocky-commit`, `/rocky-review`, `/rocky-compress`, and natural
+- `tui.prompt.append` → flips the flag in response to `/rocky`, `/ultrarocky`,
+  `/megarocky`, `/rocky off`, `/rocky-commit`, `/rocky-review`, `/rocky-compress`, and natural
   language ("turn on rocky", "stop rocky", "normal mode"). When a
   non-independent mode is active, appends a one-line reinforcement to keep
   rocky in the model's attention each turn.

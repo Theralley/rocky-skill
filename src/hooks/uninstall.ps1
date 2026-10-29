@@ -1,5 +1,5 @@
-# rocky — uninstaller for the SessionStart + UserPromptSubmit hooks (Windows PowerShell)
-# Removes: hook files in ~/.claude/hooks, settings.json entries, and the flag file
+# rocky — uninstaller for the SessionStart + SubagentStart + UserPromptSubmit + SessionEnd hooks (Windows PowerShell)
+# Removes: hook files in ~/.claude/hooks, settings.json entries, and the mode state
 # Usage: powershell -ExecutionPolicy Bypass -File src\hooks\uninstall.ps1
 #   or:  irm https://raw.githubusercontent.com/Theralley/rocky-skill/main/src/hooks/uninstall.ps1 | iex
 param()
@@ -9,9 +9,14 @@ $ErrorActionPreference = "Stop"
 $ClaudeDir = if ($env:CLAUDE_CONFIG_DIR) { $env:CLAUDE_CONFIG_DIR } else { Join-Path $env:USERPROFILE ".claude" }
 $HooksDir = Join-Path $ClaudeDir "hooks"
 $Settings = Join-Path $ClaudeDir "settings.json"
-$FlagFile = Join-Path $ClaudeDir ".rocky-active"
+$SettingsHelper = ""
+if ($PSScriptRoot) {
+    $candidate = Join-Path $PSScriptRoot "../../installer/lib/settings.js"
+    if (Test-Path -LiteralPath $candidate) { $SettingsHelper = $candidate }
+}
+$env:ROCKY_SETTINGS_HELPER = $SettingsHelper
 
-$HookFiles = @("package.json", "rocky-config.js", "rocky-activate.js", "rocky-mode-tracker.js", "rocky-stats.js", "rocky-statusline.sh", "rocky-statusline.ps1")
+$HookFiles = @("package.json", "rocky-config.js", "rocky-parse.js", "rocky-activate.js", "rocky-mode-tracker.js", "rocky-stats.js", "rocky-statusline.sh", "rocky-statusline.ps1", "rockycrew-model-overrides.js")
 
 # Detect if rocky is installed as a plugin
 $PluginInstalled = $false
@@ -35,11 +40,213 @@ if ($PluginInstalled) {
 
 Write-Host "Uninstalling rocky hooks..."
 
-# 1. Remove hook files
+# 1. Remove rocky entries from settings.json (idempotent)
+#
+# This runs BEFORE the hook files are deleted, on purpose. If the settings edit
+# cannot complete, the install is still intact and the user can re-run or edit
+# by hand. The other order left Claude Code pointing at deleted scripts, which
+# is `Cannot find module ...rocky-activate.js` on every session start (#471).
+if (Test-Path $Settings) {
+    if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
+        # Abort - do NOT fall through to deleting the hook files. settings.json
+        # still points at them, and removing them is exactly #471 on every
+        # session start. Same reason the node exit code below aborts.
+        Write-Host "ERROR: 'node' not found - cannot safely edit settings.json." -ForegroundColor Yellow
+        Write-Host "       Nothing was removed. Install node and re-run, or remove the"
+        Write-Host "       rocky SessionStart, SubagentStart, UserPromptSubmit, SessionEnd and statusLine"
+        Write-Host "       entries from $Settings by hand first."
+        exit 1
+    } else {
+        # Back up before editing, same policy as install.ps1: never overwrite an
+        # existing .bak, which is the only pre-rocky copy the user has.
+        $BackupMade = $false
+        if (-not (Test-Path "$Settings.bak")) {
+            Copy-Item $Settings "$Settings.bak"
+            $BackupMade = $true
+        }
+
+        # Pass path via env var — avoids injection if username contains a single quote.
+        # Use a single-quote here-string so PowerShell does NOT expand $variables inside.
+        $env:ROCKY_SETTINGS = $Settings -replace '\\', '/'
+
+        $nodeScript = @'
+const fs = require('fs');
+const path = require('path');
+const settingsPath = process.env.ROCKY_SETTINGS;
+// A settings.json with // comments is valid for Claude Code but not for
+// JSON.parse. Bail out before touching anything rather than half-uninstalling:
+// installer/install.js --uninstall handles JSONC properly.
+let settings;
+const shared = process.env.ROCKY_SETTINGS_HELPER ? require(process.env.ROCKY_SETTINGS_HELPER) : null;
+try {
+  settings = shared ? shared.readSettings(settingsPath) : JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+  if (!settings || typeof settings !== 'object' || Array.isArray(settings)) throw new Error('settings.json must be a readable object');
+} catch (e) {
+  console.error('  Cannot parse ' + settingsPath + ': ' + e.message);
+  console.error('  Nothing was changed. If the file has // comments, run:');
+  console.error('    npx -y github:Theralley/rocky-skill -- --uninstall');
+  process.exit(3);
+}
+
+// Own ONLY handlers whose command targets one of our exact script basenames.
+// A bare 'rocky' substring also matches user-authored hooks that merely
+// mention the word in a path (#593). Mirrors referencesManagedScript() in
+// installer/lib/settings.js — keep the two in sync.
+const MANAGED = new Set([
+  'rocky-activate.js', 'rocky-mode-tracker.js', 'rocky-stats.js',
+  'rocky-statusline.sh', 'rocky-statusline.ps1',
+]);
+const tokenize = (command) => {
+  const out = [];
+  const re = /"([^"]*)"|'([^']*)'|(\S+)/g;
+  let m;
+  while ((m = re.exec(command)) !== null) out.push(m[1] ?? m[2] ?? m[3]);
+  return out;
+};
+// win32.basename splits on both / and \ so either slash form matches.
+const isManaged = (command) => {
+  if (typeof command !== 'string') return false;
+  try {
+    return tokenize(command).some(t => MANAGED.has(path.win32.basename(t)));
+  } catch (e) { return false; }
+};
+
+let removed = 0;
+if (settings.hooks) {
+  for (const event of Object.keys(settings.hooks)) {
+    if (!Array.isArray(settings.hooks[event])) continue;
+    let removedHere = 0;
+    // Filter the inner handler list, not the entry: a matcher group holding
+    // one of ours AND a foreign hook must keep the foreign one.
+    settings.hooks[event] = settings.hooks[event].filter(entry => {
+      if (!entry || !Array.isArray(entry.hooks)) return true;
+      const before = entry.hooks.length;
+      entry.hooks = entry.hooks.filter(h => !(h && isManaged(h.command)));
+      const n = before - entry.hooks.length;
+      removedHere += n;
+      return n === 0 || entry.hooks.length > 0;
+    });
+    removed += removedHere;
+    if (removedHere > 0 && settings.hooks[event].length === 0) {
+      delete settings.hooks[event];
+    }
+  }
+  if (Object.keys(settings.hooks).length === 0) {
+    delete settings.hooks;
+  }
+}
+
+// Remove statusLine only when it points at our managed script. Matching by
+// basename also survives the slash-form mismatch between a Windows-written
+// settings.json and the forward-slashed env var.
+if (settings.statusLine) {
+  const cmd = typeof settings.statusLine === 'string'
+    ? settings.statusLine
+    : (settings.statusLine.command || '');
+  if (isManaged(cmd)) {
+    delete settings.statusLine;
+    console.log('  Removed rocky statusLine from settings.json');
+  }
+}
+
+if (shared) shared.writeSettings(settingsPath, settings);
+else fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n');
+console.log('  Removed ' + removed + ' rocky hook entries from settings.json');
+'@
+
+        # Write the script to a temp file rather than passing it to `node -e`.
+        # PowerShell's native-argument quoting mangles embedded double quotes,
+        # so `node -e "<script>"` truncated at the first one under cmd quoting
+        # (#249); install.ps1 was fixed to this shape in #250 and the
+        # uninstaller must not drift back.
+        $tmpScript = Join-Path $env:TEMP "rocky-uninstall-$([System.Diagnostics.Process]::GetCurrentProcess().Id).js"
+        try {
+            [System.IO.File]::WriteAllText($tmpScript, $nodeScript, [System.Text.Encoding]::UTF8)
+            node $tmpScript
+        } finally {
+            if (Test-Path $tmpScript) { Remove-Item $tmpScript -Force }
+        }
+
+        # $ErrorActionPreference does not trip on a native exit code, so check
+        # it by hand: without this, a failed edit still fell through and deleted
+        # the user's only pre-rocky backup.
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "Aborting: settings.json was not modified and nothing was removed." -ForegroundColor Yellow
+            exit 1
+        }
+
+        # Clean up the backup this run made. A .bak that was already there is the
+        # user's (or install's pre-rocky copy) and stays. So does ours when it
+        # is the only copy of comments the rewrite dropped, i.e. not plain JSON.
+        $env:ROCKY_BAK = ($Settings -replace '\\', '/') + '.bak'
+        $BackupIsPlainJson = $false
+        if ($BackupMade -and (Test-Path "$Settings.bak")) {
+            # Windows PowerShell 5.1 turns a native command's stderr into error
+            # records, and this script runs under $ErrorActionPreference = "Stop",
+            # which makes them TERMINATING. The probe's failure is its answer, not
+            # an error: a JSONC backup makes JSON.parse throw, node prints the
+            # stack trace to stderr, and the script died there — before the
+            # explicit `exit 0` below could set a status, which is why neither
+            # that nor clearing $LASTEXITCODE moved the powershell.exe lane. pwsh
+            # 7 does not raise on native stderr, so only 5.1 ever saw it. Scope
+            # the preference around the probe; the rest of the script keeps Stop.
+            $PreviousEAP = $ErrorActionPreference
+            $ErrorActionPreference = "Continue"
+            try {
+                # $LASTEXITCODE is 0 from the rewrite above, and a node that cannot be
+                # launched at all leaves it untouched — which would read as "plain JSON"
+                # and delete the backup. Fail safe: only an exit code node itself wrote
+                # may clear it.
+                $global:LASTEXITCODE = 1
+                node -e "JSON.parse(require('fs').readFileSync(process.env.ROCKY_BAK, 'utf8'))" 2>$null
+                $BackupIsPlainJson = ($LASTEXITCODE -eq 0)
+            } catch {
+                $BackupIsPlainJson = $false  # unreadable probe: keep the backup
+            } finally {
+                $ErrorActionPreference = $PreviousEAP
+            }
+            # The probe is a predicate, not an operation: a JSONC backup makes it
+            # exit 1 on a perfectly successful uninstall. Its result is consumed
+            # above, so keep the variable honest for anything that reads it later.
+            # This alone does NOT fix the script's exit status: assigning
+            # $LASTEXITCODE updates the variable, not the engine's record of the
+            # last native command, which is what `powershell.exe -File` returns.
+            # The explicit `exit 0` at the end of this script is what does that.
+            $global:LASTEXITCODE = 0
+        }
+        if ($BackupIsPlainJson) {
+            Remove-Item "$Settings.bak" -Force
+            Write-Host "  Removed: $Settings.bak"
+        }
+    }
+}
+
+# 2. Remove hook files (only now that settings.json no longer points at them)
 $RemovedFiles = 0
 foreach ($hook in $HookFiles) {
     $path = Join-Path $HooksDir $hook
     if (Test-Path $path) {
+        if ($hook -eq "package.json") {
+            $OwnedManifest = $false
+            # ConvertFrom-Json unwraps one-element arrays and accepts comments
+            # on newer PowerShell. Use the same strict ownership check as Node.
+            if (Get-Command node -ErrorAction SilentlyContinue) {
+                $env:ROCKY_MANIFEST_PATH = $path
+                try {
+                    @'
+try {
+  const value = JSON.parse(require('fs').readFileSync(process.env.ROCKY_MANIFEST_PATH, 'utf8'));
+  process.exit(value && value.type === 'commonjs' && Object.keys(value).length === 1 ? 0 : 1);
+} catch (_) { process.exit(1); }
+'@ | node --input-type=commonjs
+                    $OwnedManifest = $LASTEXITCODE -eq 0
+                } catch {}
+            }
+            if (-not $OwnedManifest) {
+                Write-Host "  Preserved foreign manifest: $path"
+                continue
+            }
+        }
         Remove-Item $path -Force
         Write-Host "  Removed: $path"
         $RemovedFiles++
@@ -50,78 +257,24 @@ if ($RemovedFiles -eq 0) {
     Write-Host "  No hook files found in $HooksDir"
 }
 
-# 2. Remove rocky entries from settings.json (idempotent)
-if (Test-Path $Settings) {
-    if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
-        Write-Host "WARNING: 'node' not found - cannot safely edit settings.json." -ForegroundColor Yellow
-        Write-Host "         Remove the rocky SessionStart and UserPromptSubmit"
-        Write-Host "         entries from $Settings manually."
-    } else {
-        # Back up before editing
-        Copy-Item $Settings "$Settings.bak" -Force
-
-        # Pass path via env var — avoids injection if username contains a single quote.
-        # Use a single-quote here-string so PowerShell does NOT expand $variables inside.
-        $env:ROCKY_SETTINGS = $Settings -replace '\\', '/'
-        $env:ROCKY_HOOKS_DIR = $HooksDir -replace '\\', '/'
-
-        $nodeScript = @'
-const fs = require('fs');
-const settingsPath = process.env.ROCKY_SETTINGS;
-const hooksDir = process.env.ROCKY_HOOKS_DIR;
-const managedStatusLinePath = hooksDir + '/rocky-statusline.ps1';
-const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
-
-const isRockyEntry = (entry) =>
-  entry && entry.hooks && entry.hooks.some(h =>
-    h.command && h.command.includes('rocky')
-  );
-
-let removed = 0;
-if (settings.hooks) {
-  for (const event of ['SessionStart', 'UserPromptSubmit']) {
-    if (Array.isArray(settings.hooks[event])) {
-      const before = settings.hooks[event].length;
-      settings.hooks[event] = settings.hooks[event].filter(e => !isRockyEntry(e));
-      removed += before - settings.hooks[event].length;
-      if (settings.hooks[event].length === 0) {
-        delete settings.hooks[event];
-      }
-    }
-  }
-  if (Object.keys(settings.hooks).length === 0) {
-    delete settings.hooks;
-  }
-}
-
-if (settings.statusLine) {
-  const cmd = typeof settings.statusLine === 'string'
-    ? settings.statusLine
-    : (settings.statusLine.command || '');
-  if (cmd.includes(managedStatusLinePath)) {
-    delete settings.statusLine;
-    console.log('  Removed rocky statusLine from settings.json');
-  }
-}
-
-fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n');
-console.log('  Removed ' + removed + ' rocky hook entries from settings.json');
-'@
-
-        node -e $nodeScript
-
-        # Clean up backup file left by installer
-        if (Test-Path "$Settings.bak") {
-            Remove-Item "$Settings.bak" -Force
-            Write-Host "  Removed: $Settings.bak"
-        }
+# 3. Remove mode state
+#
+# .rocky-history.jsonl is deliberately NOT removed: it is the user's
+# accumulated lifetime savings record, not rocky plumbing. Keep this list in
+# sync with the uninstall block in installer/install.js.
+foreach ($state in @(".rocky-active", ".rocky-active.prev", ".rocky-mode-log.jsonl", ".rocky-statusline-suffix", ".rocky-nudge-shown", ".rocky-statusline-stale")) {
+    $StatePath = Join-Path $ClaudeDir $state
+    if (Test-Path $StatePath) {
+        Remove-Item $StatePath -Force
+        Write-Host "  Removed: $StatePath"
     }
 }
 
-# 3. Remove flag file
-if (Test-Path $FlagFile) {
-    Remove-Item $FlagFile -Force
-    Write-Host "  Removed: $FlagFile"
+# Per-session mode files (one <session_id>.mode / .prev per window)
+$SessionsDir = Join-Path $ClaudeDir ".rocky-sessions"
+if (Test-Path $SessionsDir) {
+    Remove-Item $SessionsDir -Recurse -Force
+    Write-Host "  Removed: $SessionsDir"
 }
 
 Write-Host ""
@@ -130,6 +283,15 @@ Write-Host "Done! Restart Claude Code to complete the uninstall." -ForegroundCol
 # Guidance for other agents
 Write-Host ""
 Write-Host "Other agents:"
-Write-Host "  npx skills remove rocky      # Cursor, Windsurf, Cline, Copilot, etc."
+Write-Host "  npx skills remove Theralley/rocky-skill -g  # Cursor, Windsurf, Cline, Copilot, etc."
 Write-Host "  claude plugin disable rocky   # Claude Code plugin"
 Write-Host "  gemini extensions uninstall rocky  # Gemini CLI"
+
+# Pin the success status. Every failure path above exits explicitly, so reaching
+# here means success -- but the .bak probe deliberately runs a node that exits 1
+# whenever the backup holds the comments the rewrite dropped, and Windows
+# PowerShell 5.1 (`powershell.exe -File`, still the default shell on Windows)
+# ends a script with the last native command's exit code. A fully successful
+# uninstall of a JSONC settings.json therefore reported failure. pwsh 7 exits 0
+# in the same position, which is why only the powershell.exe lane catches it.
+exit 0

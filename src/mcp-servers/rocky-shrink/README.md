@@ -65,4 +65,4 @@ Pre-1.0 — the compression rules and field set may change. The plugin is part o
 
 ## License
 
-MIT.
+Apache-2.0.

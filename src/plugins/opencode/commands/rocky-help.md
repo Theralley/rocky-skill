@@ -5,10 +5,9 @@ Show the rocky quick-reference card.
 
 | Command | What |
 |---|---|
-| `/rocky` | Activate at default level (full) |
-| `/rocky lite` | Light compression — ~30% tokens dropped |
-| `/rocky ultra` | Maximum compression |
-| `/rocky wenyan[-lite\|-ultra]` | Classical Chinese compression |
+| `/rocky` | Rocky voice, default |
+| `/ultrarocky` | Maximum compression |
+| `/megarocky` | Classical Chinese (文言文) |
 | `/rocky off` | Deactivate |
 | `/rocky-commit` | Terse commit message |
 | `/rocky-review` | One-line review findings |

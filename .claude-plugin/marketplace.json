@@ -1,15 +1,15 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
   "name": "rocky",
-  "description": "Ultra-compressed communication mode for Claude Code. Cuts ~75% of tokens while keeping full technical accuracy.",
+  "description": "Rocky the Eridian from Project Hail Mary as Claude Code's voice: short replies, every technical fact kept.",
   "owner": {
-    "name": "Julius Brussee",
-    "url": "https://github.com/JuliusBrussee"
+    "name": "Theralley",
+    "url": "https://github.com/Theralley"
   },
   "plugins": [
     {
       "name": "rocky",
-      "description": "Talk like rocky. Cut ~75% tokens. Keep all technical accuracy.",
+      "description": "Talk like Rocky. Shorter replies. Keep all technical accuracy.",
       "source": "./",
       "category": "productivity"
     }

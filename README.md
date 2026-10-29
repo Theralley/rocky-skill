@@ -40,10 +40,10 @@ A skill / plugin for Claude Code (and Codex, Gemini, Cursor, Windsurf, Cline, Co
 
 ```bash
 # macOS / Linux / WSL / Git Bash
-curl -fsSL https://raw.githubusercontent.com/Theralley/rocky-skill/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Theralley/rocky-skill/v1.1.0/install.sh | bash
 
 # Windows (PowerShell 5.1+)
-irm https://raw.githubusercontent.com/Theralley/rocky-skill/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/Theralley/rocky-skill/v1.1.0/install.ps1 | iex
 ```
 
 Needs Node ≥18. Safe to re-run. Skips any agent you do not have. Full per-agent matrix in [INSTALL.md](./INSTALL.md).
@@ -110,15 +110,15 @@ Needs Node ≥18. Safe to re-run. Skips any agent you do not have. Full per-agen
 
 | Skill | What it does |
 |---|---|
-| `/rocky [lite\|full\|ultra\|wenyan]` | Compress every reply. Levels stick until session ends. |
+| `/rocky [lite\|full\|ultra\|wenyan]` | Rocky voice on every reply. `ultra` is also `/ultrarocky`, `wenyan` is also `/megarocky`. Mode sticks until session ends. `/rocky status` shows the mode. |
 | `/rocky-commit` | Conventional Commit messages, ≤50 char subject. *Why* over *what*. |
 | `/rocky-review` | One-line PR comments: `L42: 🔴 bug: user null. Add guard.` |
-| `/rocky-stats` | Real session token usage + lifetime savings + USD. |
-| `/rocky-compress <file>` | Rewrite memory files (`CLAUDE.md`, notes) into Rocky-speak. Cuts ~46% of input tokens every session, every project. Code/URLs/paths preserved byte-for-byte. |
+| `/rocky-stats` | Real session token usage from your Claude Code log, split by mode. No made-up savings numbers. |
+| `/rocky-compress <file>` | Rewrite memory files (`CLAUDE.md`, notes) into Rocky-speak. Smaller file, fewer input tokens every session, every project. Code/URLs/paths preserved byte-for-byte. |
 | `rocky-shrink` | MCP middleware that wraps any MCP server and compresses tool descriptions. Source ships in [`src/mcp-servers/rocky-shrink`](./src/mcp-servers/rocky-shrink/); npm package is not published on npm yet, so the installer skips this optional step cleanly when npm has no metadata. |
-| `rockycrew-*` | Three Rocky subagents (investigator / builder / reviewer). ~60% fewer tokens than vanilla; your main context lasts longer. |
+| `rockycrew-*` | Three Rocky subagents (investigator / builder / reviewer). Short answers back, so your main context lasts longer. |
 
-**Statusline badge** — Claude Code shows `[ROCKY] 🪨 12.4k` (lifetime tokens saved). Disable with `ROCKY_STATUSLINE_SAVINGS=0`.
+**Statusline badge** — Claude Code shows the active mode: `[ROCKY]`, `[ULTRAROCKY]` or `[MEGAROCKY]`. Nothing when Rocky is off.
 
 **Auto-activates every session:** Claude Code, Codex, Gemini. Cursor / Windsurf / Cline / Copilot get always-on rule files via `--with-init`. Everyone else triggers per-session with `/rocky`. Full matrix → [INSTALL.md](./INSTALL.md#what-you-get).
 
@@ -203,7 +203,7 @@ Raw data and reproduction script: [`benchmarks/`](./benchmarks/). The three-arm 
 1. The installer drops a skill file into each detected agent's config directory.
 2. The skill tells the agent to drop filler and keep substance.
 3. For Claude Code, a SessionStart hook writes a flag file so Rocky is active from message one — no need to type `/rocky` each session.
-4. `/rocky-stats` reads your Claude Code session log, counts tokens saved, and updates the statusline.
+4. `/rocky-stats` reads your Claude Code session log and counts the tokens each mode actually used.
 5. `/rocky-compress` rewrites memory files (e.g. `CLAUDE.md`) so every session also starts with a smaller context. Tokens saved forever, not just one reply.
 
 Maintainer detail (hook architecture, file ownership, CI sync) lives in [CLAUDE.md](./CLAUDE.md).
@@ -213,7 +213,7 @@ Maintainer detail (hook architecture, file ownership, CI sync) lives in [CLAUDE.
 [**OpenClaw**](https://openclaw.ai) is a self-host gateway that runs several agents in one box (Claude Code, Codex, Pi, OpenCode), wired to your Slack / Discord / iMessage / Telegram. Rocky teaches it brevity:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Theralley/rocky-skill/main/install.sh | bash -s -- --only openclaw
+curl -fsSL https://raw.githubusercontent.com/Theralley/rocky-skill/v1.1.0/install.sh | bash -s -- --only openclaw
 ```
 
 Two writes, idempotent re-runs, marker-fenced (so uninstall is clean):
@@ -261,7 +261,7 @@ Rocky saves you tokens. Stars cost zero. Fair trade. ⭐
 
 ## License
 
-MIT.
+[Apache-2.0](./LICENSE). Fork of [caveman](https://github.com/JuliusBrussee/caveman) by Julius Brussee; see [NOTICE](./NOTICE). Code from before caveman 3.0.0 keeps its MIT notice in [LICENSE-MIT](./LICENSE-MIT).
 
 ## Rocky's README Notes
 

@@ -1,6 +1,7 @@
 {
   "name": "rocky",
-  "description": "Ultra-compressed communication mode. Cuts ~75% of tokens while keeping full technical accuracy by speaking like Rocky the Eridian from Project Hail Mary.",
+  "version": "1.1.0",
+  "description": "Rocky the Eridian from Project Hail Mary as your coding agent's voice: short replies that keep every technical fact, code block, command and exact error.",
   "author": {
     "name": "Theralley",
     "url": "https://github.com/Theralley"
@@ -11,9 +12,21 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/src/hooks/rocky-activate.js\"",
-            "timeout": 5,
+            "command": "command -v node >/dev/null 2>&1 || exit 0; HOOK_ROOT=$(printf %s \"${CLAUDE_PLUGIN_ROOT}\" | sed 's|^/\\([a-zA-Z]\\)/|\\1:/|'); node \"$HOOK_ROOT/src/hooks/rocky-activate.js\"",
+            "timeout": 30,
             "statusMessage": "Loading rocky mode..."
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "command -v node >/dev/null 2>&1 || exit 0; HOOK_ROOT=$(printf %s \"${CLAUDE_PLUGIN_ROOT}\" | sed 's|^/\\([a-zA-Z]\\)/|\\1:/|'); node \"$HOOK_ROOT/src/hooks/rocky-activate.js\" --subagent",
+            "timeout": 30,
+            "statusMessage": "Loading rocky mode for subagent..."
           }
         ]
       }
@@ -23,9 +36,21 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/src/hooks/rocky-mode-tracker.js\"",
-            "timeout": 5,
+            "command": "command -v node >/dev/null 2>&1 || exit 0; HOOK_ROOT=$(printf %s \"${CLAUDE_PLUGIN_ROOT}\" | sed 's|^/\\([a-zA-Z]\\)/|\\1:/|'); node \"$HOOK_ROOT/src/hooks/rocky-mode-tracker.js\"",
+            "timeout": 30,
             "statusMessage": "Tracking rocky mode..."
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "command -v node >/dev/null 2>&1 || exit 0; HOOK_ROOT=$(printf %s \"${CLAUDE_PLUGIN_ROOT}\" | sed 's|^/\\([a-zA-Z]\\)/|\\1:/|'); node \"$HOOK_ROOT/src/hooks/rocky-stats.js\" --record",
+            "timeout": 5,
+            "statusMessage": "Recording rocky stats..."
           }
         ]
       }

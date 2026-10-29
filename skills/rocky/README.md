@@ -4,30 +4,47 @@ Talk like Rocky the Eridian. Same brain, fewer tokens.
 
 ## What it does
 
-Compress every model response to rocky-style prose. Drops articles, filler, pleasantries, and hedging. Keeps every technical detail, code block, error string, and symbol exact. Cuts ~65-75% of output tokens with full accuracy preserved. Mode persists for the whole session until changed or stopped.
+Makes the model answer first and cut the ceremony: no greeting, hedging,
+filler, recap, or closer. Articles drop when the sentence still reads in one
+pass. Code, commands, paths, numbers, and exact error strings never change.
+Result depends on model and workload. Not measured for Rocky yet. Upstream caveman publishes its own numbers, but they do not transfer: Rocky's markers and catchphrases add words. Mode persists until changed or stopped.
 
-Six intensity levels:
+Rocky is one of three sibling skills:
 
-| Level | What change |
-|-------|-------------|
-| `lite` | Drop filler/hedging. Sentences stay full. Professional but tight. |
-| `full` | Default. Drop articles, fragments OK, short synonyms. |
-| `ultra` | Bare fragments. Abbreviations (DB, auth, fn). Arrows for causality. |
-| `wenyan-lite` | Classical Chinese register, light compression. |
-| `wenyan-full` | Maximum 文言文. 80-90% character reduction. |
-| `wenyan-ultra` | Extreme classical compression. |
+| Skill | Command | What change |
+|-------|---------|-------------|
+| `rocky` | `/rocky` | The voice. Default. Answer first, filler gone, every fact kept, a few Rocky markers. `/rocky lite` keeps the rules and drops the flavor. |
+| `ultrarocky` | `/ultrarocky` | Grammar stripped. Fragments, one word when one word is enough, each fact once. |
+| `megarocky` | `/megarocky` | Classical Chinese (文言文). Far fewer characters, technical terms verbatim. |
 
-Auto-clarity rule: rocky drops to normal prose for security warnings, irreversible-action confirmations, multi-step sequences where fragment ambiguity risks misread, and when user repeats a question. Resumes after the clear part.
+`/rocky ultra` and `/rocky wenyan` still work as aliases.
+
+Auto-clarity: every skill drops to normal prose for security warnings,
+irreversible-action confirmations, step sequences a fragment could scramble,
+and a user who repeats a question. Resumes after the clear part.
 
 ## How to invoke
 
 ```
-/rocky              # full mode (default)
-/rocky lite         # lighter compression
-/rocky ultra        # extreme compression
-/rocky wenyan       # classical Chinese
+/rocky              # the voice (default)
+/rocky lite         # same rules, no Rocky flavor
+/rocky status       # show current mode without changing it
+/ultrarocky         # grammar stripped
+/megarocky          # classical Chinese
 stop rocky          # back to normal prose
 ```
+
+Claude Code and the standalone OpenCode plugin read stored mode state. Other
+hosts answer from the conversation and mark it `(not tracked by this host)`.
+
+Want Claude Code sessions to start with normal prose? Set
+`{"defaultMode":"manual"}` in `.rocky.json` for one project or
+`~/.config/rocky/config.json` for your user. You can also set
+`ROCKY_DEFAULT_MODE=manual`. Then `/rocky` activates the voice and
+`/ultrarocky` selects ultrarocky. Stop persists across compaction and resume; a
+fresh session starts off again. This startup policy is Claude Code-only:
+OpenCode keeps its rocky default because the installer also supplies static
+activation rules.
 
 ## Example output
 
@@ -36,13 +53,17 @@ Question: "Why does my React component re-render?"
 Normal prose:
 > Your component re-renders because you create a new object reference each render. Wrapping it in `useMemo` will fix the issue.
 
-Rocky (full):
-> New object ref each render. Inline object prop = new ref = re-render. Wrap in `useMemo`.
+rocky:
+> Component re-render. New object ref each render. Wrap the prop in `useMemo`.
 
-Rocky (ultra):
-> Inline obj prop → new ref → re-render. `useMemo`.
+ultrarocky:
+> Inline object prop, new ref, re-render. `useMemo`.
+
+megarocky:
+> 每繪新生對象參照，故重繪；以 `useMemo` 包之則免。
 
 ## See also
 
-- [`SKILL.md`](./SKILL.md) — full LLM-facing instructions
-- [Rocky README](../../README.md) — repo overview, install, benchmarks
+- [`SKILL.md`](./SKILL.md): full LLM-facing instructions
+- [`../ultrarocky/`](../ultrarocky/) and [`../megarocky/`](../megarocky/): the sibling skills
+- [Rocky README](../../README.md): repo overview and install

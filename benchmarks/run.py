@@ -16,7 +16,7 @@ import anthropic
 # Load .env.local from repo root if it exists
 _env_file = Path(__file__).parent.parent / ".env.local"
 if _env_file.exists():
-    for line in _env_file.read_text().splitlines():
+    for line in _env_file.read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if line and not line.startswith("#") and "=" in line:
             key, _, value = line.partition("=")
@@ -36,13 +36,13 @@ BENCHMARK_END = "<!-- BENCHMARK-TABLE-END -->"
 
 
 def load_prompts():
-    with open(PROMPTS_PATH) as f:
+    with open(PROMPTS_PATH, encoding="utf-8") as f:
         data = json.load(f)
     return data["prompts"]
 
 
 def load_rocky_system():
-    return SKILL_PATH.read_text()
+    return SKILL_PATH.read_text(encoding="utf-8")
 
 
 def sha256_file(path):
@@ -197,13 +197,13 @@ def save_results(results, rows, summary, model, trials, skill_hash):
     }
     path = RESULTS_DIR / f"benchmark_{ts}.json"
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
-    with open(path, "w") as f:
+    with open(path, "w", encoding="utf-8") as f:
         json.dump(output, f, indent=2)
     return path
 
 
 def update_readme(table_md):
-    content = README_PATH.read_text()
+    content = README_PATH.read_text(encoding="utf-8")
     start_idx = content.find(BENCHMARK_START)
     end_idx = content.find(BENCHMARK_END)
     if start_idx == -1 or end_idx == -1:
@@ -216,7 +216,7 @@ def update_readme(table_md):
     before = content[: start_idx + len(BENCHMARK_START)]
     after = content[end_idx:]
     new_content = before + "\n" + table_md + "\n" + after
-    README_PATH.write_text(new_content)
+    README_PATH.write_text(new_content, encoding="utf-8")
     print("README.md updated.", file=sys.stderr)
 
 

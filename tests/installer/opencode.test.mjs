@@ -13,12 +13,14 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
+import { isolatedEnv } from './_isolated-env.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(HERE, '..', '..');
-const INSTALLER = path.join(REPO_ROOT, 'bin', 'install.js');
+const INSTALLER = path.join(REPO_ROOT, 'installer', 'install.js');
 const requireCjs = createRequire(import.meta.url);
-const SETTINGS = requireCjs(path.join(REPO_ROOT, 'bin', 'lib', 'settings.js'));
+const SETTINGS = requireCjs(path.join(REPO_ROOT, 'installer', 'lib', 'settings.js'));
+const MODE_LOG_BASENAME = '.rocky-mode-log.jsonl';
 
 const IS_WIN = process.platform === 'win32';
 
@@ -41,41 +43,41 @@ function shimOpencode() {
 }
 
 function runInstaller(args, env) {
-  return spawnSync('node', [INSTALLER, ...args, '--non-interactive', '--no-mcp-shrink'], {
+  const configDir = path.join(env.XDG_CONFIG_HOME, 'claude-test');
+  return spawnSync(process.execPath, [INSTALLER, ...args, '--config-dir', configDir, '--non-interactive', '--no-mcp-shrink'], {
     env, encoding: 'utf8',
   });
 }
 
-function pathWith(prependDir) {
-  const sep = IS_WIN ? ';' : ':';
-  return prependDir + sep + (process.env.PATH || '');
+// The temp XDG dir doubles as HOME: uninstall walks every agent's home and
+// runs every rocky/claude/gemini it finds on PATH, so neither may be real.
+function installEnv(xdg, shimDir) {
+  return { ...isolatedEnv(xdg, [shimDir]), XDG_CONFIG_HOME: xdg };
 }
 
 // ── 1. Fresh install populates expected files ────────────────────────────
-test('opencode fresh install drops plugin, commands, agents, skills, AGENTS.md, opencode.json', () => {
+test('opencode fresh install drops plugin, commands, agents, skills, AGENTS.md, opencode.jsonc', () => {
   const xdg = freshTmpDir();
   const shimDir = shimOpencode();
   try {
-    const r = runInstaller(['--only', 'opencode'], {
-      ...process.env,
-      XDG_CONFIG_HOME: xdg,
-      PATH: pathWith(shimDir),
-      NO_COLOR: '1',
-    });
+    const r = runInstaller(['--only', 'opencode'], installEnv(xdg, shimDir));
     assert.notEqual(r.status, 2, `argv error: ${r.stderr}`);
 
     const ocDir = path.join(xdg, 'opencode');
     assert.ok(fs.existsSync(path.join(ocDir, 'plugins', 'rocky', 'plugin.js')), 'plugin.js missing');
     assert.ok(fs.existsSync(path.join(ocDir, 'plugins', 'rocky', 'package.json')), 'plugin package.json missing');
     assert.ok(fs.existsSync(path.join(ocDir, 'plugins', 'rocky', 'rocky-config.cjs')), 'rocky-config.cjs sibling missing');
+    assert.ok(fs.existsSync(path.join(ocDir, 'plugins', 'rocky', 'rocky-parse.cjs')), 'rocky-parse.cjs sibling missing');
 
-    for (const f of ['rocky.md', 'rocky-commit.md', 'rocky-review.md', 'rocky-compress.md', 'rocky-stats.md', 'rocky-help.md']) {
+    for (const f of ['rocky.md', 'ultrarocky.md', 'megarocky.md', 'rocky-commit.md', 'rocky-review.md', 'rocky-compress.md', 'rocky-stats.md', 'rocky-help.md']) {
       assert.ok(fs.existsSync(path.join(ocDir, 'commands', f)), `command ${f} missing`);
     }
     for (const f of ['rockycrew-investigator.md', 'rockycrew-builder.md', 'rockycrew-reviewer.md']) {
       assert.ok(fs.existsSync(path.join(ocDir, 'agents', f)), `agent ${f} missing`);
+      // Subagent-only: keeps rockycrew out of opencode's Tab cycle (#725).
+      assert.match(fs.readFileSync(path.join(ocDir, 'agents', f), 'utf8'), /^mode: subagent$/m, `agent ${f} must be mode: subagent`);
     }
-    for (const name of ['rocky', 'rocky-commit', 'rocky-review', 'rocky-help', 'rocky-stats', 'rocky-compress', 'rockycrew']) {
+    for (const name of ['rocky', 'ultrarocky', 'megarocky', 'rocky-commit', 'rocky-review', 'rocky-help', 'rocky-stats', 'rocky-compress', 'rockycrew']) {
       assert.ok(fs.existsSync(path.join(ocDir, 'skills', name, 'SKILL.md')), `skill ${name}/SKILL.md missing`);
     }
     assert.ok(fs.existsSync(path.join(ocDir, 'AGENTS.md')), 'AGENTS.md missing');
@@ -86,11 +88,13 @@ test('opencode fresh install drops plugin, commands, agents, skills, AGENTS.md, 
     assert.match(agentsBody, /<!-- rocky-begin -->/);
     assert.match(agentsBody, /<!-- rocky-end -->/);
 
-    const cfgPath = path.join(ocDir, 'opencode.json');
-    assert.ok(fs.existsSync(cfgPath), 'opencode.json missing');
+    // Fresh installs (neither config present) create opencode.jsonc — the
+    // installer prefers it so it never shadows an existing .jsonc (#861).
+    const cfgPath = path.join(ocDir, 'opencode.jsonc');
+    assert.ok(fs.existsSync(cfgPath), 'opencode.jsonc missing');
     const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
-    assert.ok(Array.isArray(cfg.plugin), 'opencode.json missing plugin array');
-    assert.ok(cfg.plugin.includes('./plugins/rocky/plugin.js'), 'plugin entry missing');
+    assert.ok(Array.isArray(cfg.plugin), 'opencode.jsonc missing plugin array');
+    assert.deepEqual(cfg.plugin, ['./plugins/rocky'], 'plugin entry must name the directory');
   } finally {
     fs.rmSync(xdg, { recursive: true, force: true });
     fs.rmSync(shimDir, { recursive: true, force: true });
@@ -102,14 +106,14 @@ test('opencode idempotent install does not duplicate plugin entries', () => {
   const xdg = freshTmpDir();
   const shimDir = shimOpencode();
   try {
-    const env = { ...process.env, XDG_CONFIG_HOME: xdg, PATH: pathWith(shimDir), NO_COLOR: '1' };
+    const env = installEnv(xdg, shimDir);
     const r1 = runInstaller(['--only', 'opencode'], env);
     assert.notEqual(r1.status, 2);
     const r2 = runInstaller(['--only', 'opencode'], env);
     assert.notEqual(r2.status, 2);
 
-    const cfg = JSON.parse(fs.readFileSync(path.join(xdg, 'opencode', 'opencode.json'), 'utf8'));
-    const matches = cfg.plugin.filter(p => p === './plugins/rocky/plugin.js');
+    const cfg = JSON.parse(fs.readFileSync(path.join(xdg, 'opencode', 'opencode.jsonc'), 'utf8'));
+    const matches = cfg.plugin.filter(p => p === './plugins/rocky');
     assert.equal(matches.length, 1, `expected 1 plugin entry, got ${matches.length}`);
 
     // AGENTS.md should not have the ruleset duplicated either.
@@ -127,7 +131,7 @@ test('opencode re-install preserves user edits to plugin.js without --force', ()
   const xdg = freshTmpDir();
   const shimDir = shimOpencode();
   try {
-    const env = { ...process.env, XDG_CONFIG_HOME: xdg, PATH: pathWith(shimDir), NO_COLOR: '1' };
+    const env = installEnv(xdg, shimDir);
     const r1 = runInstaller(['--only', 'opencode'], env);
     assert.notEqual(r1.status, 2);
 
@@ -154,12 +158,100 @@ test('opencode re-install preserves user edits to plugin.js without --force', ()
   }
 });
 
+test('opencode refuses an unowned plugin directory before writing other payloads', () => {
+  const xdg = freshTmpDir();
+  const shimDir = shimOpencode();
+  try {
+    const ocDir = path.join(xdg, 'opencode');
+    const userPlugin = path.join(ocDir, 'plugins', 'rocky');
+    fs.mkdirSync(userPlugin, { recursive: true });
+    fs.writeFileSync(path.join(userPlugin, 'user.js'), 'export default "mine";\n');
+    const env = installEnv(xdg, shimDir);
+
+    const result = runInstaller(['--only', 'opencode'], env);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /ownership conflict/);
+    assert.equal(fs.readFileSync(path.join(userPlugin, 'user.js'), 'utf8'), 'export default "mine";\n');
+    assert.equal(fs.existsSync(path.join(ocDir, 'commands', 'rocky.md')), false);
+    assert.equal(fs.existsSync(path.join(ocDir, '.rocky-opencode-ownership.json')), false);
+  } finally {
+    fs.rmSync(xdg, { recursive: true, force: true });
+    fs.rmSync(shimDir, { recursive: true, force: true });
+  }
+});
+
+test('opencode uninstall never deletes unjournaled same-named user content', () => {
+  const xdg = freshTmpDir();
+  const shimDir = shimOpencode();
+  try {
+    const userPlugin = path.join(xdg, 'opencode', 'plugins', 'rocky');
+    fs.mkdirSync(userPlugin, { recursive: true });
+    fs.writeFileSync(path.join(userPlugin, 'user.js'), 'export default "mine";\n');
+    const env = installEnv(xdg, shimDir);
+    const removed = runInstaller(['--uninstall'], env);
+    assert.equal(removed.status, 0, removed.stderr);
+    assert.equal(fs.readFileSync(path.join(userPlugin, 'user.js'), 'utf8'), 'export default "mine";\n');
+  } finally {
+    fs.rmSync(xdg, { recursive: true, force: true });
+    fs.rmSync(shimDir, { recursive: true, force: true });
+  }
+});
+
+test('opencode --force backs up conflicts and uninstall restores original directory', () => {
+  const xdg = freshTmpDir();
+  const shimDir = shimOpencode();
+  try {
+    const ocDir = path.join(xdg, 'opencode');
+    const userPlugin = path.join(ocDir, 'plugins', 'rocky');
+    fs.mkdirSync(userPlugin, { recursive: true });
+    fs.writeFileSync(path.join(userPlugin, 'user.js'), 'export default "mine";\n');
+    const env = installEnv(xdg, shimDir);
+
+    const installed = runInstaller(['--only', 'opencode', '--force'], env);
+    assert.equal(installed.status, 0, installed.stderr);
+    assert.equal(fs.existsSync(path.join(userPlugin, 'user.js')), false);
+    assert.ok(fs.existsSync(path.join(userPlugin, 'plugin.js')));
+
+    const removed = runInstaller(['--uninstall'], env);
+    assert.equal(removed.status, 0, removed.stderr);
+    assert.equal(fs.readFileSync(path.join(userPlugin, 'user.js'), 'utf8'), 'export default "mine";\n');
+    assert.equal(fs.existsSync(path.join(userPlugin, 'plugin.js')), false);
+    assert.equal(fs.existsSync(path.join(ocDir, 'commands', 'rocky.md')), false);
+  } finally {
+    fs.rmSync(xdg, { recursive: true, force: true });
+    fs.rmSync(shimDir, { recursive: true, force: true });
+  }
+});
+
+test('opencode uninstall leaves modified owned files and keeps journal evidence', () => {
+  const xdg = freshTmpDir();
+  const shimDir = shimOpencode();
+  try {
+    const env = installEnv(xdg, shimDir);
+    const installed = runInstaller(['--only', 'opencode'], env);
+    assert.equal(installed.status, 0, installed.stderr);
+    const ocDir = path.join(xdg, 'opencode');
+    const command = path.join(ocDir, 'commands', 'rocky.md');
+    fs.appendFileSync(command, '\nUSER EDIT\n');
+
+    const removed = runInstaller(['--uninstall'], env);
+    assert.equal(removed.status, 1, removed.stderr);
+    assert.match(removed.stderr, /left modified/);
+    assert.match(removed.stderr, /uninstall incomplete/);
+    assert.match(fs.readFileSync(command, 'utf8'), /USER EDIT/);
+    assert.ok(fs.existsSync(path.join(ocDir, '.rocky-opencode-ownership.json')));
+  } finally {
+    fs.rmSync(xdg, { recursive: true, force: true });
+    fs.rmSync(shimDir, { recursive: true, force: true });
+  }
+});
+
 // ── 2c. AGENTS.md fence preserves user content above and below ───────────
 test('opencode uninstall strips fenced AGENTS.md block, preserving user prefix and suffix', () => {
   const xdg = freshTmpDir();
   const shimDir = shimOpencode();
   try {
-    const env = { ...process.env, XDG_CONFIG_HOME: xdg, PATH: pathWith(shimDir), NO_COLOR: '1' };
+    const env = installEnv(xdg, shimDir);
     const r1 = runInstaller(['--only', 'opencode'], env);
     assert.notEqual(r1.status, 2);
 
@@ -187,6 +279,32 @@ test('opencode uninstall strips fenced AGENTS.md block, preserving user prefix a
   }
 });
 
+// ── 2d. A CRLF AGENTS.md gets a CRLF block and comes back byte for byte ──
+test('opencode AGENTS.md with CRLF line endings keeps them through install and uninstall', () => {
+  const xdg = freshTmpDir();
+  const shimDir = shimOpencode();
+  try {
+    const env = installEnv(xdg, shimDir);
+    const agentsMd = path.join(xdg, 'opencode', 'AGENTS.md');
+    const user = '# my project\r\n\r\nuse 2-space indent.\r\n';
+    fs.mkdirSync(path.dirname(agentsMd), { recursive: true });
+    fs.writeFileSync(agentsMd, user);
+
+    assert.notEqual(runInstaller(['--only', 'opencode'], env).status, 2);
+    const installed = fs.readFileSync(agentsMd, 'utf8');
+    assert.doesNotMatch(installed, /(^|[^\r])\n/, 'LF line ending in a CRLF file');
+    assert.ok(installed.startsWith(`${user}\r\n<!-- rocky-begin -->\r\n`), JSON.stringify(installed.slice(0, 80)));
+    assert.notEqual(runInstaller(['--only', 'opencode'], env).status, 2);
+    assert.equal(fs.readFileSync(agentsMd, 'utf8'), installed, 'a second install rewrote the CRLF block');
+
+    assert.notEqual(runInstaller(['--uninstall'], env).status, 2);
+    assert.equal(fs.readFileSync(agentsMd, 'utf8'), user);
+  } finally {
+    fs.rmSync(xdg, { recursive: true, force: true });
+    fs.rmSync(shimDir, { recursive: true, force: true });
+  }
+});
+
 // ── 3. Tolerates JSONC opencode.json (#249-class regression guard) ───────
 test('opencode install tolerates JSONC opencode.json (comments + trailing commas)', () => {
   const xdg = freshTmpDir();
@@ -203,14 +321,14 @@ test('opencode install tolerates JSONC opencode.json (comments + trailing commas
 }
 `);
 
-    const env = { ...process.env, XDG_CONFIG_HOME: xdg, PATH: pathWith(shimDir), NO_COLOR: '1' };
+    const env = installEnv(xdg, shimDir);
     const r = runInstaller(['--only', 'opencode'], env);
     assert.notEqual(r.status, 2);
 
     const cfg = JSON.parse(fs.readFileSync(path.join(ocDir, 'opencode.json'), 'utf8'));
     assert.equal(cfg.model, 'anthropic/claude-sonnet-4-5', 'user model setting wiped');
     assert.equal(cfg.theme, 'dark', 'user theme setting wiped');
-    assert.ok(cfg.plugin.includes('./plugins/rocky/plugin.js'), 'plugin entry missing');
+    assert.ok(cfg.plugin.includes('./plugins/rocky'), 'plugin entry missing');
   } finally {
     fs.rmSync(xdg, { recursive: true, force: true });
     fs.rmSync(shimDir, { recursive: true, force: true });
@@ -222,7 +340,7 @@ test('opencode uninstall removes plugin dir, command/agent/skill files, prunes o
   const xdg = freshTmpDir();
   const shimDir = shimOpencode();
   try {
-    const env = { ...process.env, XDG_CONFIG_HOME: xdg, PATH: pathWith(shimDir), NO_COLOR: '1' };
+    const env = installEnv(xdg, shimDir);
     const r1 = runInstaller(['--only', 'opencode'], env);
     assert.notEqual(r1.status, 2);
 
@@ -236,10 +354,12 @@ test('opencode uninstall removes plugin dir, command/agent/skill files, prunes o
     assert.equal(fs.existsSync(path.join(ocDir, 'skills', 'rocky')), false, 'rocky skill dir survived');
     assert.equal(fs.existsSync(path.join(ocDir, 'AGENTS.md')), false, 'AGENTS.md (we wrote it) survived');
 
-    if (fs.existsSync(path.join(ocDir, 'opencode.json'))) {
-      const cfg = JSON.parse(fs.readFileSync(path.join(ocDir, 'opencode.json'), 'utf8'));
-      const stillHasPlugin = Array.isArray(cfg.plugin) && cfg.plugin.includes('./plugins/rocky/plugin.js');
-      assert.equal(stillHasPlugin, false, 'plugin entry survived in opencode.json');
+    for (const name of ['opencode.jsonc', 'opencode.json']) {
+      const cfgPath = path.join(ocDir, name);
+      if (!fs.existsSync(cfgPath)) continue;
+      const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+      const stillHasPlugin = Array.isArray(cfg.plugin) && cfg.plugin.includes('./plugins/rocky');
+      assert.equal(stillHasPlugin, false, `plugin entry survived in ${name}`);
     }
   } finally {
     fs.rmSync(xdg, { recursive: true, force: true });
@@ -247,40 +367,812 @@ test('opencode uninstall removes plugin dir, command/agent/skill files, prunes o
   }
 });
 
-// ── 5. Plugin smoke: load installed plugin.js, fire fake hooks ────────────
-test('opencode plugin handles /rocky ultra and stop rocky via tui.prompt.append', async () => {
+// ── 5. Plugin smoke: load installed plugin.js, fire the real opencode hooks ──
+// opencode (>= 1.15) has no `tui.prompt.append` or top-level `session.created`
+// plugin-hook keys (#418/#421). The plugin now uses `chat.message` for mode
+// parsing, `experimental.chat.system.transform` for reinforcement, and the
+// `event` dispatcher (filtering event.type === 'session.created') for session
+// init. This test drives those real hooks.
+test('opencode plugin handles /rocky ultra, /megarocky, stop rocky, and session init via real hooks', async () => {
   const xdg = freshTmpDir();
   const shimDir = shimOpencode();
+  const origDefault = process.env.ROCKY_DEFAULT_MODE;
   try {
-    const env = { ...process.env, XDG_CONFIG_HOME: xdg, PATH: pathWith(shimDir), NO_COLOR: '1' };
+    const env = installEnv(xdg, shimDir);
     const r = runInstaller(['--only', 'opencode'], env);
     assert.notEqual(r.status, 2);
 
     const pluginPath = path.join(xdg, 'opencode', 'plugins', 'rocky', 'plugin.js');
     const flagPath = path.join(xdg, 'opencode', '.rocky-active');
+    const modeLogPath = path.join(xdg, 'opencode', MODE_LOG_BASENAME);
 
-    // Set XDG_CONFIG_HOME for the plugin so flagPath resolves to our temp dir.
+    // Set XDG_CONFIG_HOME so the plugin's flagPath resolves to our temp dir,
+    // and pin the default mode so session-init is deterministic regardless of
+    // any ambient user/repo-local rocky config.
     process.env.XDG_CONFIG_HOME = xdg;
+    process.env.ROCKY_DEFAULT_MODE = 'rocky';
 
     const mod = await import(pathToFileURL(pluginPath).href);
     const factory = mod.default || mod.RockyPlugin;
     const handlers = await factory({});
 
-    // Slash command activates ultra
-    const out1 = await handlers['tui.prompt.append']({ prompt: '/rocky ultra' });
-    assert.equal(fs.readFileSync(flagPath, 'utf8'), 'ultra');
-    assert.ok(out1 && typeof out1.append === 'string', 'expected reinforcement append');
-    assert.match(out1.append, /ROCKY MODE ACTIVE \(ultra\)/);
+    // The dead direct-key hooks must NOT be registered.
+    assert.equal(handlers['tui.prompt.append'], undefined, 'tui.prompt.append should not exist');
+    assert.equal(handlers['session.created'], undefined, 'session.created direct key should not exist');
+    assert.equal(typeof handlers.event, 'function', 'event dispatcher should be a function');
+    assert.equal(typeof handlers['chat.message'], 'function', 'chat.message should be a function');
+    assert.equal(typeof handlers['experimental.chat.system.transform'], 'function',
+      'system.transform should be a function');
 
-    // Natural-language deactivation removes flag
-    const out2 = await handlers['tui.prompt.append']({ prompt: 'stop rocky please' });
+    // Slash command in a chat.message text part activates ultrarocky (the
+    // legacy `ultra` argument is an alias).
+    await handlers['chat.message']({}, { parts: [{ type: 'text', text: '/rocky ultra' }] });
+    assert.equal(fs.readFileSync(flagPath, 'utf8'), 'ultrarocky');
+    assert.ok(fs.existsSync(modeLogPath), 'mode log missing after slash activation');
+    const activationRows = fs.readFileSync(modeLogPath, 'utf8').trim().split('\n').map(JSON.parse);
+    assert.equal(activationRows.at(-1).mode, 'ultrarocky');
+
+    // Status must replace the activation template and report the actual flag,
+    // without touching mode history or refreshing its mtime.
+    const beforeStatus = [fs.readFileSync(modeLogPath, 'utf8'), fs.statSync(flagPath).mtimeMs];
+    for (const text of ['/rocky status', '/rocky:rocky status',
+      'Activate rocky mode: status\n\nIf no argument given, use rocky.']) {
+      const output = { parts: [{ type: 'text', text }] };
+      await handlers['chat.message']({}, output);
+      assert.equal(output.parts[0].text, 'Report this status verbatim without changing mode: Rocky mode: ultrarocky');
+      assert.equal(fs.readFileSync(flagPath, 'utf8'), 'ultrarocky');
+      assert.deepEqual([fs.readFileSync(modeLogPath, 'utf8'), fs.statSync(flagPath).mtimeMs], beforeStatus);
+    }
+
+    // opencode expands "/rocky <arg>" into the command template before
+    // chat.message fires — the argument must be recovered from the expanded text.
+    await handlers['chat.message']({}, { parts: [{ type: 'text', text:
+      'Activate rocky mode: wenyan-lite\n\nIf no argument given, use rocky. If "off", deactivate.' }] });
+    assert.equal(fs.readFileSync(flagPath, 'utf8'), 'megarocky');
+    await handlers['chat.message']({}, { parts: [{ type: 'text', text:
+      'Activate rocky mode: off\n\nIf no argument given, use rocky. If "off", deactivate.' }] });
+    assert.equal(fs.existsSync(flagPath), false, 'expanded template with off should delete the flag');
+    await handlers['chat.message']({}, { parts: [{ type: 'text', text:
+      'Activate rocky mode: \n\nIf no argument given, use rocky. If "off", deactivate.' }] });
+    assert.equal(fs.readFileSync(flagPath, 'utf8'), 'rocky', 'expanded template without argument uses default');
+    // /ultrarocky and /megarocky expand to their own command templates.
+    for (const [file, mode] of [['ultrarocky.md', 'ultrarocky'], ['megarocky.md', 'megarocky']]) {
+      const tpl = fs.readFileSync(path.join(REPO_ROOT, 'src', 'plugins', 'opencode', 'commands', file), 'utf8')
+        .replace(/^---[\s\S]*?---\s*/, '');
+      await handlers['chat.message']({}, { parts: [{ type: 'text', text: tpl }] });
+      assert.equal(fs.readFileSync(flagPath, 'utf8'), mode, file);
+    }
+
+    // opencode's non-interactive `run` path wraps the message in literal
+    // quotes ("/rocky lite"\n) — the parser must unwrap them.
+    await handlers['chat.message']({}, { parts: [{ type: 'text', text: '"/rocky lite"\n' }] });
+    assert.equal(fs.readFileSync(flagPath, 'utf8'), 'rocky');
+    await handlers['chat.message']({}, { parts: [{ type: 'text', text: '/ultrarocky' }] });
+    assert.equal(fs.readFileSync(flagPath, 'utf8'), 'ultrarocky');
+
+    // system.transform injects the reinforcement line while active.
+    const sys1 = { system: [] };
+    await handlers['experimental.chat.system.transform']({}, sys1);
+    assert.equal(sys1.system.length, 1, 'expected one reinforcement line');
+    assert.match(sys1.system[0], /ROCKY MODE ACTIVE \(ultrarocky\)/);
+
+    // Existing system prompts must remain a single entry. Some vLLM chat
+    // templates reject a second system message even when both precede user
+    // content, so append the reinforcement to the existing entry.
+    const sysWithExisting = { system: ['existing system prompt'] };
+    await handlers['experimental.chat.system.transform']({}, sysWithExisting);
+    assert.equal(sysWithExisting.system.length, 1, 'must not add a second system message');
+    assert.match(sysWithExisting.system[0], /^existing system prompt\n\nROCKY MODE ACTIVE \(ultrarocky\)/);
+
+    // Idempotent across repeated transforms on the SAME array: if opencode
+    // ever reuses output.system between turns, an unguarded append would grow
+    // the system prompt without bound and silently eat the context window.
+    await handlers['experimental.chat.system.transform']({}, sysWithExisting);
+    await handlers['experimental.chat.system.transform']({}, sysWithExisting);
+    assert.equal(sysWithExisting.system.length, 1, 'must not add entries on re-transform');
+    assert.equal(
+      sysWithExisting.system[0].match(/ROCKY MODE ACTIVE/g).length,
+      1,
+      'reinforcement line must not accumulate across transforms',
+    );
+
+    // Natural-language deactivation removes the flag.
+    await handlers['chat.message']({}, { parts: [{ type: 'text', text: 'stop rocky please' }] });
     assert.equal(fs.existsSync(flagPath), false, 'flag should be deleted after deactivation');
-    assert.equal(out2, undefined, 'no reinforcement when flag absent');
+    const deactivationRows = fs.readFileSync(modeLogPath, 'utf8').trim().split('\n').map(JSON.parse);
+    assert.equal(deactivationRows.at(-1).mode, null);
 
-    // session.created writes default mode
-    await handlers['session.created']();
-    assert.equal(fs.readFileSync(flagPath, 'utf8'), 'full');
+    const offStatus = { parts: [{ type: 'text', text: '/rocky status' }] };
+    await handlers['chat.message']({}, offStatus);
+    assert.equal(offStatus.parts[0].text, 'Report this status verbatim without changing mode: Rocky mode: off');
+    assert.equal(fs.existsSync(flagPath), false, 'status must not activate the default');
+
+    process.env.ROCKY_DEFAULT_MODE = 'manual';
+    await handlers.event({ event: { type: 'session.created' } });
+    assert.equal(fs.readFileSync(flagPath, 'utf8'), 'rocky', 'Claude-only manual policy must not pretend OpenCode static rules are disabled');
+    await handlers['chat.message']({}, { parts: [{ type: 'text', text: '/rocky' }] });
+    assert.equal(fs.readFileSync(flagPath, 'utf8'), 'rocky', 'manual policy permits explicit activation');
+    await handlers['chat.message']({}, { parts: [{ type: 'text', text: 'stop rocky' }] });
+    assert.equal(fs.existsSync(flagPath), false);
+    process.env.ROCKY_DEFAULT_MODE = 'rocky';
+
+    // No reinforcement injected when inactive.
+    const sys2 = { system: [] };
+    await handlers['experimental.chat.system.transform']({}, sys2);
+    assert.equal(sys2.system.length, 0, 'no reinforcement when flag absent');
+
+    // The `event` dispatcher writes the default mode on session.created, and
+    // ignores unrelated event types.
+    await handlers.event({ event: { type: 'session.idle' } });
+    assert.equal(fs.existsSync(flagPath), false, 'non-session.created event must not write the flag');
+    // A subagent's session must not reset the mode the user chose.
+    await handlers.event({ event: { type: 'session.created', properties: { info: { parentID: 'ses_parent' } } } });
+    await handlers.event({ event: { type: 'session.created', data: { sessionID: 'ses_child', parentID: 'ses_parent' } } });
+    assert.equal(fs.existsSync(flagPath), false, 'a child session must not re-activate rocky after "stop rocky"');
+    await handlers.event({ event: { type: 'session.created' } });
+    assert.equal(fs.readFileSync(flagPath, 'utf8'), 'rocky');
+    const sessionInitRows = fs.readFileSync(modeLogPath, 'utf8').trim().split('\n').map(JSON.parse);
+    assert.deepEqual(
+      { mode: sessionInitRows.at(-1).mode, prev: sessionInitRows.at(-1).prev },
+      { mode: 'rocky', prev: null },
+    );
+
+    // A session starting with the default resolved to "off" turns rocky off,
+    // and that transition is a mode change like any other — stats must be able
+    // to attribute the messages that follow to rocky being inactive.
+    process.env.ROCKY_DEFAULT_MODE = 'off';
+    await handlers.event({ event: { type: 'session.created' } });
+    assert.equal(fs.existsSync(flagPath), false, 'session init with default off should delete the flag');
+    const sessionOffRows = fs.readFileSync(modeLogPath, 'utf8').trim().split('\n').map(JSON.parse);
+    assert.deepEqual(
+      { mode: sessionOffRows.at(-1).mode, prev: sessionOffRows.at(-1).prev },
+      { mode: null, prev: 'rocky' },
+    );
   } finally {
+    if (origDefault === undefined) delete process.env.ROCKY_DEFAULT_MODE;
+    else process.env.ROCKY_DEFAULT_MODE = origDefault;
+    fs.rmSync(xdg, { recursive: true, force: true });
+    fs.rmSync(shimDir, { recursive: true, force: true });
+  }
+});
+
+// ── opencode 2.x: the same payload loads through server.js ────────────────
+// opencode 2 skips the opencode.json file entry for plugin.js ("configured
+// plugin path must be a directory"), discovers plugins/rocky/ itself, loads
+// <dir>/server.js and requires `export default { id, setup(ctx) }`. Without
+// that file rocky's mode tracking silently never ran on 2.x. This drives
+// the V2 surface the way the host does: event stream, prompt and context hooks.
+test('opencode 2.x loads server.js: session init, prompt mode changes and context reinforcement', async () => {
+  const xdg = freshTmpDir();
+  const shimDir = shimOpencode();
+  const origDefault = process.env.ROCKY_DEFAULT_MODE;
+  const origXdg = process.env.XDG_CONFIG_HOME;
+  try {
+    const r = runInstaller(['--only', 'opencode'], installEnv(xdg, shimDir));
+    assert.equal(r.status, 0, r.stderr);
+    const pluginDir = path.join(xdg, 'opencode', 'plugins', 'rocky');
+    const flagPath = path.join(xdg, 'opencode', '.rocky-active');
+    // 1.x loads only top-level plugins/*.{js,ts} plus the config entry, so a
+    // server.js inside the plugin directory never reaches the 1.x loader.
+    const cfg = SETTINGS.readSettings(path.join(xdg, 'opencode', 'opencode.jsonc'));
+    assert.deepEqual(cfg.plugin, ['./plugins/rocky']);
+
+    process.env.XDG_CONFIG_HOME = xdg;
+    process.env.ROCKY_DEFAULT_MODE = 'rocky';
+    const mod = await import(pathToFileURL(path.join(pluginDir, 'server.js')).href);
+    assert.equal(mod.default.id, 'rocky');
+    assert.equal(typeof mod.default.setup, 'function');
+
+    const hooks = {};
+    let delivered;
+    const eventsDone = new Promise((resolve) => { delivered = resolve; });
+    const ctx = {
+      event: {
+        subscribe: async function* () {
+          yield { type: 'session.created', data: { sessionID: 'ses_1' } };
+          yield { type: 'session.created', data: { sessionID: 'ses_child', parentID: 'ses_1' } };
+          delivered();
+        },
+      },
+      session: { hook: async (name, callback) => { hooks[name] = callback; return { dispose: async () => {} }; } },
+    };
+    const cleanup = await mod.default.setup(ctx);
+    assert.equal(typeof cleanup, 'function');
+    await eventsDone;
+    assert.equal(fs.readFileSync(flagPath, 'utf8'), 'rocky', 'session init did not write the flag');
+
+    const prompt = (text) => {
+      const event = { sessionID: 'ses_1', prompt: { text } };
+      return hooks.prompt(event).then(() => event.prompt.text);
+    };
+    await prompt('/ultrarocky');
+    assert.equal(fs.readFileSync(flagPath, 'utf8'), 'ultrarocky');
+    assert.equal(await prompt('/rocky status'), 'Report this status verbatim without changing mode: Rocky mode: ultrarocky');
+    // A subagent's prompt is written by the model; it must not switch the mode.
+    await hooks.prompt({ sessionID: 'ses_child', prompt: { text: 'stop rocky' } });
+    assert.equal(fs.readFileSync(flagPath, 'utf8'), 'ultrarocky', 'a subagent prompt changed the mode');
+
+    const context = { sessionID: 'ses_1', system: [{ type: 'text', text: 'host prompt' }] };
+    await hooks.context(context);
+    assert.equal(context.system.length, 2);
+    assert.equal(context.system[1].type, 'text');
+    assert.match(context.system[1].text, /^ROCKY MODE ACTIVE \(ultrarocky\)/);
+
+    await prompt('stop rocky');
+    assert.equal(fs.existsSync(flagPath), false, 'stop rocky did not clear the flag');
+    const quiet = { sessionID: 'ses_1', system: [] };
+    await hooks.context(quiet);
+    assert.deepEqual(quiet.system, []);
+    cleanup();
+  } finally {
+    if (origDefault === undefined) delete process.env.ROCKY_DEFAULT_MODE;
+    else process.env.ROCKY_DEFAULT_MODE = origDefault;
+    if (origXdg === undefined) delete process.env.XDG_CONFIG_HOME;
+    else process.env.XDG_CONFIG_HOME = origXdg;
+    fs.rmSync(xdg, { recursive: true, force: true });
+    fs.rmSync(shimDir, { recursive: true, force: true });
+  }
+});
+
+// ── opencode 2.x: a second setup() for one location is a no-op ────────────
+// opencode 2 can find plugins/rocky/ twice: the opencode.json `plugin` entry
+// that 1.x needs, and the auto-discovery of plugins/. 2.0.29 activates one copy,
+// but server.js must not depend on that. A second active setup would register a
+// second subscriber, prompt hook and context hook: two banners per request.
+test('opencode 2.x server.js: a second setup() for the same location registers nothing until the first is disposed', async () => {
+  const xdg = freshTmpDir();
+  const shimDir = shimOpencode();
+  const origDefault = process.env.ROCKY_DEFAULT_MODE;
+  const origXdg = process.env.XDG_CONFIG_HOME;
+  const cleanups = [];
+  try {
+    const r = runInstaller(['--only', 'opencode'], installEnv(xdg, shimDir));
+    assert.equal(r.status, 0, r.stderr);
+    process.env.XDG_CONFIG_HOME = xdg;
+    process.env.ROCKY_DEFAULT_MODE = 'rocky';
+    const serverUrl = pathToFileURL(path.join(xdg, 'opencode', 'plugins', 'rocky', 'server.js')).href;
+    const first = (await import(serverUrl)).default;
+    // A second module instance of the same file, as a second load path can give.
+    const second = (await import(serverUrl + '?copy=2')).default;
+    assert.notEqual(first, second, 'test needs two module instances');
+
+    const makeCtx = (directory) => {
+      const ctx = {
+        location: { directory, project: { id: 'prj', directory } },
+        hooks: {},
+        registrations: 0,
+        subscriptions: 0,
+        signals: [],
+        event: {
+          subscribe: (opts = {}) => {
+            ctx.subscriptions++;
+            ctx.signals.push(opts.signal);
+            return (async function* () {
+              await new Promise((resolve) => {
+                if (!opts.signal || opts.signal.aborted) return resolve();
+                opts.signal.addEventListener('abort', resolve, { once: true });
+              });
+            })();
+          },
+        },
+        session: {
+          hook: async (name, callback) => {
+            ctx.registrations++;
+            ctx.hooks[name] = callback;
+            return { dispose: async () => {} };
+          },
+        },
+      };
+      return ctx;
+    };
+    const dirA = path.join(xdg, 'project-a');
+    const dirB = path.join(xdg, 'project-b');
+
+    const a1 = makeCtx(dirA);
+    const disposeA1 = await first.setup(a1);
+    cleanups.push(disposeA1);
+    assert.equal(a1.registrations, 2, 'first setup registers prompt + context');
+    assert.equal(a1.subscriptions, 1);
+
+    // Same location again, from the same and from another module instance.
+    const a2 = makeCtx(dirA);
+    const disposeA2 = await first.setup(a2);
+    const a3 = makeCtx(dirA);
+    const disposeA3 = await second.setup(a3);
+    assert.equal(typeof disposeA2, 'function');
+    assert.equal(typeof disposeA3, 'function');
+    assert.equal(a2.registrations + a3.registrations, 0, 'a duplicate setup registered hooks');
+    assert.equal(a2.subscriptions + a3.subscriptions, 0, 'a duplicate setup subscribed to events');
+
+    // Disposing a no-op duplicate must not release the active copy.
+    disposeA2();
+    const a4 = makeCtx(dirA);
+    cleanups.push(await first.setup(a4));
+    assert.equal(a4.registrations, 0, 'a no-op disposer released the active setup');
+
+    // One active copy: one banner per request.
+    const context = { sessionID: 'ses_1', system: [{ type: 'text', text: 'host prompt' }] };
+    await a1.hooks.context(context);
+    const banners = context.system.filter((part) => /^ROCKY MODE ACTIVE/.test(part.text));
+    assert.equal(banners.length, 1);
+
+    // Another project in the same service gets its own active setup.
+    const b1 = makeCtx(dirB);
+    cleanups.push(await second.setup(b1));
+    assert.equal(b1.registrations, 2, 'a second location must still load rocky');
+
+    // After dispose, a reload (dispose, then setup) activates again.
+    disposeA1();
+    assert.equal(a1.signals[0].aborted, true, 'dispose did not stop the event subscription');
+    disposeA1(); // a repeated dispose is harmless
+    const a5 = makeCtx(dirA);
+    cleanups.push(await second.setup(a5));
+    assert.equal(a5.registrations, 2, 'setup after dispose must register again');
+    assert.equal(a5.subscriptions, 1);
+    disposeA3();
+  } finally {
+    for (const dispose of cleanups) dispose();
+    if (origDefault === undefined) delete process.env.ROCKY_DEFAULT_MODE;
+    else process.env.ROCKY_DEFAULT_MODE = origDefault;
+    if (origXdg === undefined) delete process.env.XDG_CONFIG_HOME;
+    else process.env.XDG_CONFIG_HOME = origXdg;
+    fs.rmSync(xdg, { recursive: true, force: true });
+    fs.rmSync(shimDir, { recursive: true, force: true });
+  }
+});
+
+// ── system.transform must inject the ACTIVE MODE's skill ─────────────────
+// Checks injected content differs per mode and a mid-session switch replaces
+// the whole block rather than stacking behind the prior one (#792).
+test('opencode system.transform injects the active mode\'s SKILL.md body or thesis, not just the banner', async () => {
+  const xdg = freshTmpDir();
+  const shimDir = shimOpencode();
+  const origDefault = process.env.ROCKY_DEFAULT_MODE;
+  try {
+    const env = installEnv(xdg, shimDir);
+    const r = runInstaller(['--only', 'opencode'], env);
+    assert.notEqual(r.status, 2);
+
+    const pluginPath = path.join(xdg, 'opencode', 'plugins', 'rocky', 'plugin.js');
+    process.env.XDG_CONFIG_HOME = xdg;
+    process.env.ROCKY_DEFAULT_MODE = 'rocky';
+
+    const mod = await import(pathToFileURL(pluginPath).href);
+    const factory = mod.default || mod.RockyPlugin;
+    const handlers = await factory({});
+
+    // The rocky skill is installed beside the plugin, so its whole body
+    // travels.
+    await handlers['chat.message']({}, { parts: [{ type: 'text', text: '/rocky' }] });
+    const sys = { system: [] };
+    await handlers['experimental.chat.system.transform']({}, sys);
+    assert.match(sys.system[0], /ROCKY MODE ACTIVE \(rocky\)/);
+    assert.match(sys.system[0], /Rocky is a voice, not broken grammar\./,
+      'rocky should carry its SKILL.md body, not just the banner');
+
+    // Switching mode mid-session must swap in the NEW mode's rules, not leave
+    // rocky's stacked behind it (the idempotent-rewrite path). Whether the
+    // ultrarocky skill dir is installed or not, its thesis line is present.
+    await handlers['chat.message']({}, { parts: [{ type: 'text', text: '/ultrarocky' }] });
+    await handlers['experimental.chat.system.transform']({}, sys); // reuse same array, as opencode may
+    await handlers['experimental.chat.system.transform']({}, sys);
+    assert.match(sys.system[0], /ROCKY MODE ACTIVE \(ultrarocky\)/);
+    assert.match(sys.system[0], /Only filler goes\. Then cut again\./, 'ultrarocky must carry its own thesis');
+    assert.doesNotMatch(sys.system[0], /Rocky is a voice, not broken grammar\./,
+      'switching to ultrarocky must drop rocky\'s body, not accumulate it');
+    assert.equal((sys.system[0].match(/ROCKY MODE ACTIVE/g) || []).length, 1,
+      'banner must not duplicate across repeated transforms');
+
+    // The legacy wenyan argument lands on megarocky.
+    await handlers['chat.message']({}, { parts: [{ type: 'text', text: '/rocky wenyan' }] });
+    const sysMega = { system: [] };
+    await handlers['experimental.chat.system.transform']({}, sysMega);
+    assert.match(sysMega.system[0], /ROCKY MODE ACTIVE \(megarocky\)/);
+    assert.match(sysMega.system[0], /以文言答。技術之實皆存，唯贅言去之。/);
+  } finally {
+    if (origDefault === undefined) delete process.env.ROCKY_DEFAULT_MODE;
+    else process.env.ROCKY_DEFAULT_MODE = origDefault;
+    fs.rmSync(xdg, { recursive: true, force: true });
+    fs.rmSync(shimDir, { recursive: true, force: true });
+  }
+});
+
+// ── a stale rocky-config.cjs must degrade, not throw ───────────────────
+// plugin.js reads the skill loader out of rocky-config.js instead of
+// keeping its own copy, and the installed rocky-config.cjs is a COPY: an
+// opencode plugin dir left over from before the shared loader existed has no
+// loadRuleset/thesisLine export. That is plugin-cache drift, the same case the
+// hooks guard against, and it lands inside a system-prompt hook — throwing
+// there costs the user the banner too, not just the ruleset.
+test('opencode system.transform degrades to the banner when rocky-config.cjs predates the shared ruleset loader', async () => {
+  const xdg = freshTmpDir();
+  const shimDir = shimOpencode();
+  const origDefault = process.env.ROCKY_DEFAULT_MODE;
+  try {
+    const env = installEnv(xdg, shimDir);
+    assert.notEqual(runInstaller(['--only', 'opencode'], env).status, 2);
+
+    // Roll the installed copy back to a pre-shared-loader shape by dropping
+    // the export line, exactly as tests/test_mode_tracker_ruleset.js does for
+    // the hook side. The rest of the module — the flag helpers plugin.js
+    // destructures at load — stays intact, which is what makes this drift
+    // rather than a corrupt file.
+    const cfgPath = path.join(xdg, 'opencode', 'plugins', 'rocky', 'rocky-config.cjs');
+    const body = fs.readFileSync(cfgPath, 'utf8');
+    const stripped = body.replace(/^\s*skillPathCandidates, loadRuleset, thesisLine, rulesetBanner, fallbackRuleset,\n/m, '');
+    assert.notEqual(stripped, body, 'export line to strip not found — test is stale');
+    fs.writeFileSync(cfgPath, stripped);
+
+    process.env.XDG_CONFIG_HOME = xdg;
+    process.env.ROCKY_DEFAULT_MODE = 'rocky';
+    const pluginPath = path.join(xdg, 'opencode', 'plugins', 'rocky', 'plugin.js');
+    const mod = await import(pathToFileURL(pluginPath).href + '?stale');
+    const handlers = await (mod.default || mod.RockyPlugin)({});
+
+    await handlers['chat.message']({}, { parts: [{ type: 'text', text: '/rocky' }] });
+    const sys = { system: [] };
+    await handlers['experimental.chat.system.transform']({}, sys);
+
+    assert.match(sys.system[0], /ROCKY MODE ACTIVE \(rocky\)/,
+      'a stale config must still leave the user the banner');
+    assert.doesNotMatch(sys.system[0], /Respond terse like Rocky the Eridian/,
+      'a config with no loader cannot have produced a ruleset or thesis');
+  } finally {
+    if (origDefault === undefined) delete process.env.ROCKY_DEFAULT_MODE;
+    else process.env.ROCKY_DEFAULT_MODE = origDefault;
+    fs.rmSync(xdg, { recursive: true, force: true });
+    fs.rmSync(shimDir, { recursive: true, force: true });
+  }
+});
+
+// ── a rocky-config.cjs with no recordModeChange must not break the plugin ─
+// The mode-history log is the NEWEST thing plugin.js pulls out of
+// rocky-config, and handleSessionCreated() runs at factory time, outside any
+// try. So an installed plugin dir that predates the export would throw during
+// plugin construction rather than in a handler: the user loses activation
+// entirely, not just the history line. The log is best-effort by its own
+// design (recordModeChange silent-fails internally), so the correct
+// degradation is a no-op, and the mode flag must still be written.
+test('opencode session init still activates when rocky-config.cjs predates recordModeChange', async () => {
+  const xdg = freshTmpDir();
+  const shimDir = shimOpencode();
+  const origDefault = process.env.ROCKY_DEFAULT_MODE;
+  try {
+    const env = installEnv(xdg, shimDir);
+    assert.notEqual(runInstaller(['--only', 'opencode'], env).status, 2);
+
+    const pluginDir = path.join(xdg, 'opencode', 'plugins', 'rocky');
+    const cfgPath = path.join(pluginDir, 'rocky-config.cjs');
+    const body = fs.readFileSync(cfgPath, 'utf8');
+    const stripped = body.replace(/^\s*recordModeChange, MODE_LOG_BASENAME,\n/m, '  MODE_LOG_BASENAME,\n');
+    assert.notEqual(stripped, body, 'export line to strip not found — test is stale');
+    fs.writeFileSync(cfgPath, stripped);
+
+    process.env.XDG_CONFIG_HOME = xdg;
+    // A legacy level name in the env still resolves (to rocky).
+    process.env.ROCKY_DEFAULT_MODE = 'full';
+    const pluginPath = path.join(pluginDir, 'plugin.js');
+    // Factory construction is where the unguarded call would throw.
+    const mod = await import(pathToFileURL(pluginPath).href + '?norecord');
+    const handlers = await (mod.default || mod.RockyPlugin)({});
+
+    assert.equal(fs.readFileSync(path.join(xdg, 'opencode', '.rocky-active'), 'utf8').trim(), 'rocky',
+      'session init must still write the mode flag with no recordModeChange export');
+
+    // And a later mode change must still take effect rather than throwing.
+    await handlers['chat.message']({}, { parts: [{ type: 'text', text: '/rocky ultra' }] });
+    assert.equal(fs.readFileSync(path.join(xdg, 'opencode', '.rocky-active'), 'utf8').trim(), 'ultrarocky',
+      'a mode change must still apply with no recordModeChange export');
+    assert.ok(!fs.existsSync(path.join(xdg, 'opencode', MODE_LOG_BASENAME)),
+      'a stripped config cannot have written a history log');
+  } finally {
+    if (origDefault === undefined) delete process.env.ROCKY_DEFAULT_MODE;
+    else process.env.ROCKY_DEFAULT_MODE = origDefault;
+    fs.rmSync(xdg, { recursive: true, force: true });
+    fs.rmSync(shimDir, { recursive: true, force: true });
+  }
+});
+
+// ── AGENTS.md marker damage must not splice the file ─────────────────────
+// Both markers present is not enough: they must be one matched pair, in order.
+// An END above a BEGIN made `existing.indexOf(END, begin)` return -1, and the
+// slice arithmetic then re-appended the whole file from byte 19, compounding
+// on every re-run.
+test('opencode leaves an AGENTS.md with unmatched rocky markers untouched', () => {
+  const xdg = freshTmpDir();
+  const shimDir = shimOpencode();
+  try {
+    const ocDir = path.join(xdg, 'opencode');
+    fs.mkdirSync(ocDir, { recursive: true });
+    const agentsMd = path.join(ocDir, 'AGENTS.md');
+    const original = [
+      '## My team notes',
+      'Never force-push.',
+      '<!-- rocky-end -->',
+      'more user text',
+      '<!-- rocky-begin -->',
+      'stale rules',
+      '',
+    ].join('\n');
+    fs.writeFileSync(agentsMd, original);
+
+    const env = installEnv(xdg, shimDir);
+    for (let i = 0; i < 2; i++) {
+      const r = runInstaller(['--only', 'opencode'], env);
+      assert.notEqual(r.status, 2, `argv error: ${r.stderr}`);
+      assert.match(r.stdout, /unmatched rocky markers/);
+    }
+    assert.equal(fs.readFileSync(agentsMd, 'utf8'), original, 'damaged-marker AGENTS.md must be byte-identical');
+  } finally {
+    fs.rmSync(xdg, { recursive: true, force: true });
+    fs.rmSync(shimDir, { recursive: true, force: true });
+  }
+});
+
+// ── 9. One-shot independent modes restore the displaced prose mode ──────────
+// #599 parity. On Claude Code, rocky-mode-tracker.js remembers the prose mode
+// a one-shot (/rocky-commit, /rocky-review, /rocky-compress) displaces and
+// restores it on the next ordinary prompt. The opencode plugin wrote the
+// one-shot mode and never came back: `experimental.chat.system.transform` skips
+// INDEPENDENT_MODES, so a single /rocky-commit silently killed per-turn
+// reinforcement for the rest of the session — it only self-healed at the next
+// session.created. Same shared helpers (writeSessionPrev/readSessionPrev/
+// clearSessionPrev), same restore rule, so the two hosts cannot drift again.
+test('opencode plugin restores the displaced prose mode after a one-shot mode', async () => {
+  const xdg = freshTmpDir();
+  const shimDir = shimOpencode();
+  const origDefault = process.env.ROCKY_DEFAULT_MODE;
+  const origXdg = process.env.XDG_CONFIG_HOME;
+  try {
+    const env = installEnv(xdg, shimDir);
+    const r = runInstaller(['--only', 'opencode'], env);
+    assert.notEqual(r.status, 2, `argv error: ${r.stderr}`);
+
+    const pluginPath = path.join(xdg, 'opencode', 'plugins', 'rocky', 'plugin.js');
+    const flagPath = path.join(xdg, 'opencode', '.rocky-active');
+    const prevPath = path.join(xdg, 'opencode', '.rocky-active.prev');
+
+    process.env.XDG_CONFIG_HOME = xdg;
+    process.env.ROCKY_DEFAULT_MODE = 'rocky';
+
+    const mod = await import(pathToFileURL(pluginPath).href);
+    const handlers = await (mod.default || mod.RockyPlugin)({});
+
+    const send = (text) => handlers['chat.message']({}, { parts: [{ type: 'text', text }] });
+    const reinforced = async () => {
+      const out = { system: ['base'] };
+      await handlers['experimental.chat.system.transform']({}, out);
+      return /ROCKY MODE ACTIVE/.test(out.system[0]);
+    };
+    const flag = () => (fs.existsSync(flagPath) ? fs.readFileSync(flagPath, 'utf8') : null);
+
+    // A one-shot displaces ultrarocky and remembers it.
+    await send('/ultrarocky');
+    assert.equal(flag(), 'ultrarocky');
+    await send('/rocky-commit');
+    assert.equal(flag(), 'commit', 'one-shot must take effect for its own turn');
+    assert.equal(await reinforced(), false, 'independent modes carry their own skill, not rocky reinforcement');
+    assert.equal(fs.readFileSync(prevPath, 'utf8'), 'ultrarocky', 'displaced prose mode must be remembered');
+
+    // The next ordinary prompt restores it — this is what regressed.
+    await send('now fix the parser bug');
+    assert.equal(flag(), 'ultrarocky', 'next ordinary prompt must restore the displaced prose mode');
+    assert.equal(await reinforced(), true, 'reinforcement must resume after the one-shot');
+    assert.equal(fs.existsSync(prevPath), false, 'prev must be cleared once consumed');
+
+    // A second one-shot chained onto the first must still restore the ORIGINAL
+    // prose mode, not the intervening one-shot.
+    await send('/rocky-commit');
+    await send('/rocky-review');
+    assert.equal(flag(), 'review');
+    assert.equal(fs.readFileSync(prevPath, 'utf8'), 'ultrarocky', 'chained one-shots keep the first return target');
+    await send('ship it');
+    assert.equal(flag(), 'ultrarocky', 'chained one-shots restore the original prose mode');
+
+    // A one-shot entered while rocky is OFF must restore off, never a stale
+    // return target left behind by an earlier one-shot.
+    await send('stop rocky');
+    assert.equal(flag(), null);
+    await send('/rocky-compress');
+    assert.equal(flag(), 'compress');
+    await send('summarize that');
+    assert.equal(flag(), null, 'a one-shot entered from off must return to off');
+    assert.equal(await reinforced(), false);
+  } finally {
+    if (origDefault === undefined) delete process.env.ROCKY_DEFAULT_MODE;
+    else process.env.ROCKY_DEFAULT_MODE = origDefault;
+    if (origXdg === undefined) delete process.env.XDG_CONFIG_HOME;
+    else process.env.XDG_CONFIG_HOME = origXdg;
+    fs.rmSync(xdg, { recursive: true, force: true });
+    fs.rmSync(shimDir, { recursive: true, force: true });
+  }
+});
+
+// ── 10. Uninstall removes the opencode mode state, both files ──────────────
+// The Claude-side cleanup sweeps a `stateFiles` list that already names
+// `.rocky-active.prev`; the opencode branch only unlinked `.rocky-active`,
+// which was correct while the plugin never wrote a prev file. It writes one now
+// (one-shot restore, test 9), so uninstall has to take both or it leaves state
+// behind — and a stale prev is not inert: a reinstall's first one-shot would
+// read it as that session's return target.
+test('opencode uninstall removes both the mode flag and the one-shot prev file', () => {
+  const xdg = freshTmpDir();
+  const shimDir = shimOpencode();
+  try {
+    const env = installEnv(xdg, shimDir);
+    const installed = runInstaller(['--only', 'opencode'], env);
+    assert.equal(installed.status, 0, installed.stderr);
+
+    const ocDir = path.join(xdg, 'opencode');
+    const flag = path.join(ocDir, '.rocky-active');
+    const prev = path.join(ocDir, '.rocky-active.prev');
+    fs.writeFileSync(flag, 'commit');
+    fs.writeFileSync(prev, 'ultrarocky');
+
+    const removed = runInstaller(['--uninstall'], env);
+    assert.equal(removed.status, 0, removed.stderr);
+    assert.equal(fs.existsSync(flag), false, 'mode flag must be removed');
+    assert.equal(fs.existsSync(prev), false, 'one-shot prev file must be removed');
+  } finally {
+    fs.rmSync(xdg, { recursive: true, force: true });
+    fs.rmSync(shimDir, { recursive: true, force: true });
+  }
+});
+
+// ── 10b. Uninstall puts a commented opencode.jsonc back and leaves nothing ──
+// Install rewrites the config as plain JSON (comments gone) and keeps the
+// original in opencode.jsonc.bak; the plugin also writes a mode log. Uninstall
+// used to leave the comment-less file, the .bak and the log behind.
+test('opencode uninstall restores a commented opencode.jsonc and removes its backup and the mode log', () => {
+  const xdg = freshTmpDir();
+  const shimDir = shimOpencode();
+  try {
+    const env = installEnv(xdg, shimDir);
+    const ocDir = path.join(xdg, 'opencode');
+    const cfgPath = path.join(ocDir, 'opencode.jsonc');
+    const original = '{\n  // my opencode config\n  "theme": "tokyonight",\n  "plugin": ["my-plugin"], // trailing comma ok\n}\n';
+    fs.mkdirSync(ocDir, { recursive: true });
+    fs.writeFileSync(cfgPath, original);
+
+    const installed = runInstaller(['--only', 'opencode'], env);
+    assert.equal(installed.status, 0, installed.stderr);
+    assert.deepEqual(SETTINGS.readSettings(cfgPath).plugin, ['my-plugin', './plugins/rocky']);
+    fs.writeFileSync(path.join(ocDir, MODE_LOG_BASENAME), '{"mode":"rocky"}\n');
+
+    const removed = runInstaller(['--uninstall'], env);
+    assert.equal(removed.status, 0, removed.stderr);
+    assert.equal(fs.readFileSync(cfgPath, 'utf8'), original, 'the original config, comments included, must come back');
+    assert.equal(fs.existsSync(cfgPath + '.bak'), false, 'the install backup must go');
+    assert.equal(fs.existsSync(path.join(ocDir, MODE_LOG_BASENAME)), false, 'the mode log must go');
+
+    // A config the user changed after install keeps its backup: nothing is lost.
+    assert.equal(runInstaller(['--only', 'opencode'], env).status, 0);
+    const changed = SETTINGS.readSettings(cfgPath);
+    SETTINGS.writeSettings(cfgPath, { ...changed, model: 'anthropic/claude-sonnet-4-5' });
+    assert.equal(runInstaller(['--uninstall'], env).status, 0);
+    assert.equal(fs.readFileSync(cfgPath + '.bak', 'utf8'), original, 'a changed config must keep the pre-install backup');
+    assert.deepEqual(SETTINGS.readSettings(cfgPath), { theme: 'tokyonight', plugin: ['my-plugin'], model: 'anthropic/claude-sonnet-4-5' });
+  } finally {
+    fs.rmSync(xdg, { recursive: true, force: true });
+    fs.rmSync(shimDir, { recursive: true, force: true });
+  }
+});
+
+// ── 10b-2. A restore that fails leaves uninstall incomplete ─────────────────
+// A failed copy back used to be a warning only, with uninstall reported done.
+// A backup that cannot be deleted after a good copy is still a restore.
+test('opencode uninstall reports a failed config restore, but not a backup it could not delete', () => {
+  const shimDir = shimOpencode();
+  try {
+    for (const [broken, status] of [['copyFileSync', 1], ['unlinkSync', 0]]) {
+      const xdg = freshTmpDir();
+      try {
+        const env = installEnv(xdg, shimDir);
+        const cfgPath = path.join(xdg, 'opencode', 'opencode.jsonc');
+        const original = '{\n  // mine\n  "theme": "tokyonight"\n}\n';
+        fs.mkdirSync(path.dirname(cfgPath), { recursive: true });
+        fs.writeFileSync(cfgPath, original);
+        assert.equal(runInstaller(['--only', 'opencode'], env).status, 0);
+
+        // Preloaded into the uninstall: the one fs call on the config backup fails.
+        const preload = path.join(xdg, 'break-fs.cjs');
+        fs.writeFileSync(preload, "const fs = require('fs');\n"
+          + `const name = ${JSON.stringify(broken)};\nconst orig = fs[name];\n`
+          + "fs[name] = function (p, ...rest) {\n"
+          + "  if (String(p).endsWith('opencode.jsonc.bak')) throw Object.assign(new Error(`EACCES: ${name}`), { code: 'EACCES' });\n"
+          + '  return orig.call(this, p, ...rest);\n};\n');
+        // NODE_OPTIONS reads a backslash as an escape: give Windows forward slashes.
+        const removed = runInstaller(['--uninstall'], { ...env, NODE_OPTIONS: `--require "${preload.replaceAll('\\', '/')}"` });
+        assert.equal(removed.status, status, `${broken}: ${removed.stdout}${removed.stderr}`);
+        if (broken === 'copyFileSync') {
+          assert.match(removed.stderr, /could not restore/);
+          assert.match(removed.stderr, /uninstall incomplete/);
+        } else {
+          assert.equal(fs.readFileSync(cfgPath, 'utf8'), original, 'the original config must come back');
+          assert.doesNotMatch(removed.stderr, /could not restore/);
+        }
+      } finally {
+        fs.rmSync(xdg, { recursive: true, force: true });
+      }
+    }
+  } finally {
+    fs.rmSync(shimDir, { recursive: true, force: true });
+  }
+});
+
+// ── 10c. The plugin entry names the directory, so opencode 2 loads it quietly ─
+// A plugin.js entry worked on 1.x only; 2.x warned "configured plugin path
+// must be a directory" on every start. An older install's entry is replaced.
+test('opencode install replaces an older plugin.js entry with the directory entry', () => {
+  const xdg = freshTmpDir();
+  const shimDir = shimOpencode();
+  try {
+    const env = installEnv(xdg, shimDir);
+    const cfgPath = path.join(xdg, 'opencode', 'opencode.json');
+    fs.mkdirSync(path.dirname(cfgPath), { recursive: true });
+    fs.writeFileSync(cfgPath, JSON.stringify({ plugin: ['./plugins/rocky/plugin.js', 'my-plugin'] }) + '\n');
+
+    const installed = runInstaller(['--only', 'opencode'], env);
+    assert.equal(installed.status, 0, installed.stderr);
+    assert.deepEqual(SETTINGS.readSettings(cfgPath).plugin, ['my-plugin', './plugins/rocky']);
+  } finally {
+    fs.rmSync(xdg, { recursive: true, force: true });
+    fs.rmSync(shimDir, { recursive: true, force: true });
+  }
+});
+
+// ── 11. An older rocky-config.cjs copy must not turn rocky OFF ─────────
+// The installed plugin loads a COPY of rocky-config (#848 plugin-cache
+// drift), which can predate writeSessionPrev/readSessionPrev/clearSessionPrev.
+// With no-op stubs the restore path reads a null return target and falls to its
+// deactivate branch, so a single /rocky-commit deleted the flag on the next
+// prompt — strictly worse than both the old behavior (one-shot sticks until the
+// next session) and the new one. Degrade to the old behavior instead.
+test('opencode plugin does not deactivate rocky when the config copy predates the prev helpers', async () => {
+  const xdg = freshTmpDir();
+  const shimDir = shimOpencode();
+  const origDefault = process.env.ROCKY_DEFAULT_MODE;
+  const origXdg = process.env.XDG_CONFIG_HOME;
+  try {
+    const env = installEnv(xdg, shimDir);
+    const r = runInstaller(['--only', 'opencode'], env);
+    assert.notEqual(r.status, 2, `argv error: ${r.stderr}`);
+
+    const pluginDir = path.join(xdg, 'opencode', 'plugins', 'rocky');
+    const configCjs = path.join(pluginDir, 'rocky-config.cjs');
+    // Simulate the older copy: everything else intact, the three prev exports
+    // absent — exactly what a pre-#599 rocky-config.cjs looks like.
+    fs.appendFileSync(configCjs,
+      '\ndelete module.exports.writeSessionPrev;'
+      + '\ndelete module.exports.readSessionPrev;'
+      + '\ndelete module.exports.clearSessionPrev;\n');
+
+    const flagPath = path.join(xdg, 'opencode', '.rocky-active');
+    process.env.XDG_CONFIG_HOME = xdg;
+    process.env.ROCKY_DEFAULT_MODE = 'rocky';
+
+    // Cache-bust: earlier tests in this file already imported plugin.js.
+    const mod = await import(`${pathToFileURL(path.join(pluginDir, 'plugin.js')).href}?legacy-config`);
+    const handlers = await (mod.default || mod.RockyPlugin)({});
+    const send = (text) => handlers['chat.message']({}, { parts: [{ type: 'text', text }] });
+    const flag = () => (fs.existsSync(flagPath) ? fs.readFileSync(flagPath, 'utf8') : null);
+
+    await send('/ultrarocky');
+    assert.equal(flag(), 'ultrarocky');
+    await send('/rocky-commit');
+    assert.equal(flag(), 'commit');
+
+    // The regression: this deleted the flag. Without the prev helpers the
+    // one-shot simply sticks, which is what this plugin did before #599 landed
+    // here — never a silent deactivation.
+    await send('now fix the parser bug');
+    assert.notEqual(flag(), null, 'a one-shot must never deactivate rocky on an older config copy');
+    assert.equal(flag(), 'commit', 'without prev helpers the one-shot sticks, as it did before');
+  } finally {
+    if (origDefault === undefined) delete process.env.ROCKY_DEFAULT_MODE;
+    else process.env.ROCKY_DEFAULT_MODE = origDefault;
+    if (origXdg === undefined) delete process.env.XDG_CONFIG_HOME;
+    else process.env.XDG_CONFIG_HOME = origXdg;
     fs.rmSync(xdg, { recursive: true, force: true });
     fs.rmSync(shimDir, { recursive: true, force: true });
   }

@@ -1,6 +1,6 @@
 #!/bin/bash
 # rocky — one-command hook installer for Claude Code
-# Installs: SessionStart hook (auto-load rules) + UserPromptSubmit hook (mode tracking)
+# Installs: SessionStart hook (auto-load rules) + SubagentStart hook (subagent mode) + UserPromptSubmit hook (mode tracking) + SessionEnd stats recorder
 # Usage: bash src/hooks/install.sh
 #   or:  bash <(curl -s https://raw.githubusercontent.com/Theralley/rocky-skill/main/src/hooks/install.sh)
 #   or:  bash src/hooks/install.sh --force   (re-install over existing hooks)
@@ -35,15 +35,44 @@ fi
 CLAUDE_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 HOOKS_DIR="$CLAUDE_DIR/hooks"
 SETTINGS="$CLAUDE_DIR/settings.json"
-REPO_URL="https://raw.githubusercontent.com/Theralley/rocky-skill/main/hooks"
+REPO_URL="https://raw.githubusercontent.com/Theralley/rocky-skill/main/src/hooks"
 
-HOOK_FILES=("package.json" "rocky-config.js" "rocky-activate.js" "rocky-mode-tracker.js" "rocky-stats.js" "rocky-statusline.sh")
+HOOK_FILES=("package.json" "rocky-config.js" "rocky-parse.js" "rocky-activate.js" "rocky-mode-tracker.js" "rocky-stats.js" "rocky-statusline.sh" "rockycrew-model-overrides.js")
 
 # Resolve source — works from repo clone or curl pipe
 SCRIPT_DIR=""
 if [ -n "${BASH_SOURCE[0]:-}" ] && [ -f "${BASH_SOURCE[0]}" ]; then
   SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
 fi
+
+# Clone installs share the unified installer's JSONC parser. A standalone copy
+# without that helper refuses unsupported settings before changing any files.
+SETTINGS_HELPER=""
+if [ -n "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/../../installer/lib/settings.js" ]; then
+  SETTINGS_HELPER="$SCRIPT_DIR/../../installer/lib/settings.js"
+fi
+ROCKY_SETTINGS="$SETTINGS" ROCKY_HOOKS_DIR="$HOOKS_DIR" ROCKY_SETTINGS_HELPER="$SETTINGS_HELPER" node --input-type=commonjs <<'NODE'
+const fs = require('fs');
+try {
+  const manifest = process.env.ROCKY_HOOKS_DIR + '/package.json';
+  if (fs.existsSync(manifest)) {
+    const value = JSON.parse(fs.readFileSync(manifest, 'utf8'));
+    if (!value || typeof value !== 'object' || Array.isArray(value) || (value.type !== undefined && value.type !== 'commonjs')) {
+      throw new Error('existing hooks/package.json is incompatible with CommonJS hooks');
+    }
+  }
+  const file = process.env.ROCKY_SETTINGS;
+  if (fs.existsSync(file)) {
+    const helper = process.env.ROCKY_SETTINGS_HELPER;
+    const value = helper ? require(helper).readSettings(file) : JSON.parse(fs.readFileSync(file, 'utf8'));
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('settings.json must be a readable object');
+  }
+} catch (error) {
+  console.error('Cannot install standalone hooks: ' + error.message);
+  console.error('Nothing was changed. For JSONC settings, use installer/install.js from a clone.');
+  process.exit(1);
+}
+NODE
 
 # Check if already installed (unless --force). Older installs only had two hook
 # files, so require the full current set plus the hook registrations before we
@@ -64,14 +93,20 @@ if [ "$FORCE" -eq 0 ]; then
     if ROCKY_SETTINGS="$SETTINGS" node -e "
       const fs = require('fs');
       const settings = JSON.parse(fs.readFileSync(process.env.ROCKY_SETTINGS, 'utf8'));
-      const hasRockyHook = (event) =>
+      // Probe for the exact script we wire for this event, not a bare
+      // 'rocky' substring — that also matches user hooks merely mentioning
+      // the word in a path (#593), which made us skip wiring and silently
+      // leave rocky inactive.
+      const hasRockyHook = (event, script) =>
         Array.isArray(settings.hooks?.[event]) &&
         settings.hooks[event].some(e =>
-          e.hooks && e.hooks.some(h => h.command && h.command.includes('rocky'))
+          e.hooks && e.hooks.some(h => h.command && h.command.includes(script))
         );
       process.exit(
-        hasRockyHook('SessionStart') &&
-        hasRockyHook('UserPromptSubmit') &&
+        hasRockyHook('SessionStart', 'rocky-activate.js') &&
+        hasRockyHook('SubagentStart', 'rocky-activate.js') &&
+        hasRockyHook('UserPromptSubmit', 'rocky-mode-tracker.js') &&
+        hasRockyHook('SessionEnd', 'rocky-stats.js') &&
         !!settings.statusLine
           ? 0
           : 1
@@ -106,6 +141,10 @@ mkdir -p "$HOOKS_DIR"
 
 # 2. Copy or download hook files
 for hook in "${HOOK_FILES[@]}"; do
+  if [ "$hook" = "package.json" ] && [ -e "$HOOKS_DIR/$hook" ]; then
+    echo "  Preserved existing: $HOOKS_DIR/$hook"
+    continue
+  fi
   if [ -n "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/$hook" ]; then
     cp "$SCRIPT_DIR/$hook" "$HOOKS_DIR/$hook"
   else
@@ -122,30 +161,56 @@ if [ ! -f "$SETTINGS" ]; then
   echo '{}' > "$SETTINGS"
 fi
 
-# Back up existing settings.json before touching it
-cp "$SETTINGS" "$SETTINGS.bak"
+# Back up existing settings.json before touching it. Back up ONCE: without the
+# guard a --force reinstall overwrites the only pre-rocky copy with the
+# already-merged file, destroying the user's recovery path. Same guard as
+# installer/install.js.
+if [ ! -f "$SETTINGS.bak" ]; then
+  cp "$SETTINGS" "$SETTINGS.bak"
+fi
 
 # Pass paths via env vars — avoids shell injection if $HOME contains single quotes
-ROCKY_SETTINGS="$SETTINGS" ROCKY_HOOKS_DIR="$HOOKS_DIR" node -e "
+ROCKY_SETTINGS="$SETTINGS" ROCKY_HOOKS_DIR="$HOOKS_DIR" ROCKY_SETTINGS_HELPER="$SETTINGS_HELPER" node -e "
   const fs = require('fs');
   const settingsPath = process.env.ROCKY_SETTINGS;
   const hooksDir = process.env.ROCKY_HOOKS_DIR;
   const managedStatusLinePath = hooksDir + '/rocky-statusline.sh';
-  const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+  const shared = process.env.ROCKY_SETTINGS_HELPER ? require(process.env.ROCKY_SETTINGS_HELPER) : null;
+  const meta = {};
+  const settings = shared ? shared.readSettings(settingsPath, meta) : JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+  if (!settings || typeof settings !== 'object' || Array.isArray(settings)) throw new Error('settings.json must be a readable object');
+  if (meta.jsonc) console.log('  Comments are preserved in ' + settingsPath + '.bak; updated settings use JSON.');
   if (!settings.hooks) settings.hooks = {};
 
   // SessionStart — auto-load rocky rules
   if (!settings.hooks.SessionStart) settings.hooks.SessionStart = [];
+  // Match the exact script, not a bare 'rocky' substring (#593).
   const hasStart = settings.hooks.SessionStart.some(e =>
-    e.hooks && e.hooks.some(h => h.command && h.command.includes('rocky'))
+    e.hooks && e.hooks.some(h => h.command && h.command.includes('rocky-activate.js'))
   );
   if (!hasStart) {
     settings.hooks.SessionStart.push({
       hooks: [{
         type: 'command',
         command: 'node \"' + hooksDir + '/rocky-activate.js\"',
-        timeout: 5,
+        timeout: 30,
         statusMessage: 'Loading rocky mode...'
+      }]
+    });
+  }
+
+  // SubagentStart — hand subagents this session's active mode (#621)
+  if (!settings.hooks.SubagentStart) settings.hooks.SubagentStart = [];
+  const hasSubagent = settings.hooks.SubagentStart.some(e =>
+    e.hooks && e.hooks.some(h => h.command && h.command.includes('rocky-activate.js'))
+  );
+  if (!hasSubagent) {
+    settings.hooks.SubagentStart.push({
+      hooks: [{
+        type: 'command',
+        command: 'node \"' + hooksDir + '/rocky-activate.js\" --subagent',
+        timeout: 30,
+        statusMessage: 'Loading rocky mode for subagent...'
       }]
     });
   }
@@ -153,15 +218,31 @@ ROCKY_SETTINGS="$SETTINGS" ROCKY_HOOKS_DIR="$HOOKS_DIR" node -e "
   // UserPromptSubmit — track mode changes when user types /rocky commands
   if (!settings.hooks.UserPromptSubmit) settings.hooks.UserPromptSubmit = [];
   const hasPrompt = settings.hooks.UserPromptSubmit.some(e =>
-    e.hooks && e.hooks.some(h => h.command && h.command.includes('rocky'))
+    e.hooks && e.hooks.some(h => h.command && h.command.includes('rocky-mode-tracker.js'))
   );
   if (!hasPrompt) {
     settings.hooks.UserPromptSubmit.push({
       hooks: [{
         type: 'command',
         command: 'node \"' + hooksDir + '/rocky-mode-tracker.js\"',
-        timeout: 5,
+        timeout: 30,
         statusMessage: 'Tracking rocky mode...'
+      }]
+    });
+  }
+
+  // SessionEnd — silently record a lifetime stats snapshot
+  if (!settings.hooks.SessionEnd) settings.hooks.SessionEnd = [];
+  const hasEnd = settings.hooks.SessionEnd.some(e =>
+    e.hooks && e.hooks.some(h => h.command && h.command.includes('rocky-stats.js'))
+  );
+  if (!hasEnd) {
+    settings.hooks.SessionEnd.push({
+      hooks: [{
+        type: 'command',
+        command: 'node \"' + hooksDir + '/rocky-stats.js\" --record',
+        timeout: 5,
+        statusMessage: 'Recording rocky stats...'
       }]
     });
   }
@@ -185,7 +266,8 @@ ROCKY_SETTINGS="$SETTINGS" ROCKY_HOOKS_DIR="$HOOKS_DIR" node -e "
     }
   }
 
-  fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n');
+  if (shared) shared.writeSettings(settingsPath, settings);
+  else fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n');
   console.log('  Hooks wired in settings.json');
 "
 
@@ -194,6 +276,8 @@ echo "Done! Restart Claude Code to activate."
 echo ""
 echo "What's installed:"
 echo "  - SessionStart hook: auto-loads rocky rules every session"
+echo "  - SubagentStart hook: subagents inherit the session's active mode"
 echo "  - Mode tracker hook: updates statusline badge when you switch modes"
-echo "    (/rocky lite, /rocky ultra, /rocky-commit, etc.)"
-echo "  - Statusline badge: shows [ROCKY] or [ROCKY:ULTRA] etc."
+echo "    (/rocky, /ultrarocky, /megarocky, /rocky-commit, etc.)"
+echo "  - SessionEnd hook: records lifetime stats silently"
+echo "  - Statusline badge: shows [ROCKY], [ULTRAROCKY] or [MEGAROCKY]"

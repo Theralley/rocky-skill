@@ -1,16 +1,24 @@
-benchmarks/results/*.json
 __pycache__/
 *.pyc
 .venv/
 .env.local
-rocky-compress.md
 **/.DS_Store
 .claude/worktrees/
 evals/snapshots/*.html
 evals/snapshots/*.png
-context/refs/research-brief-rocky-code-efficiency.md
+evals/snapshots/*.partial.json
+# Agent scratch: specs and implementation notes are not shipped artifacts.
+/context/
 
 # Build artifacts
 dist/*
 !dist/rocky.skill
 .DS_Store
+
+# Dependencies and Python build output
+node_modules/
+*.egg-info/
+__pycache__/
+
+# oh-my-claudecode session state
+.omc/
